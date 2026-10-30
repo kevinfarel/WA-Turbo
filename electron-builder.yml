@@ -1,0 +1,23 @@
+appId: local.waturbo.app
+productName: WA Turbo
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**
+  - package.json
+extraResources:
+  - from: migrations
+    to: migrations
+mac:
+  target:
+    - target: dmg
+      arch: [arm64]
+  identity: "-"          # ad-hoc signature, enough for this Mac
+  hardenedRuntime: false  # only needed for notarized distribution
+  category: public.app-category.productivity
+  icon: build/icon.png
+  extendInfo:
+    LSMinimumSystemVersion: "13.0"
+dmg:
+  title: WA Turbo

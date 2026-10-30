@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: wat-media:; media-src 'self' wat-media:; connect-src 'self' ws: wat-media:">
+<title>WA Turbo</title>
+<link rel="stylesheet" href="./styles/app.css">
+<link rel="stylesheet" href="./styles/app-extra.css">
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ===== window chrome ===== -->
+  <div class="titlebar">
+    <div class="title-id">
+      <span class="mark" aria-hidden="true">
+        <svg class="od-icon" style="--od-icon-size:13px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/></svg>
+      </span>
+      <b>WA Turbo</b>
+      <span id="titleAcct"></span>
+    </div>
+
+    <div class="seg" role="tablist" aria-label="Main sections">
+      <button type="button" role="tab" id="tab-inbox" aria-selected="true" aria-controls="view-inbox" data-view="inbox">
+        <svg class="od-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-4.2-7.6L21 3l-1.4 4.2A8.9 8.9 0 0 1 21 12z"/><path d="M8 11h8M8 15h5"/></svg>
+        <span class="lbl">Inbox</span><span class="count" id="segUnread">0</span>
+      </button>
+      <button type="button" role="tab" id="tab-loops" aria-selected="false" aria-controls="view-loops" data-view="loops">
+        <svg class="od-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.6c2.7 2.1 4.3 5.3 4.3 8.8 0 2-.5 3.7-1.3 5H9c-.8-1.3-1.3-3-1.3-5 0-3.5 1.6-6.7 4.3-8.8M12 9.7h.01M7.7 12.9 5.4 15.2v3.2l2.6-1.7M16.3 12.9l2.3 2.3v3.2L16 17M10.3 19.6c.4 1.2 1 2.1 1.7 2.8.7-.7 1.3-1.6 1.7-2.8"/></svg>
+        <span class="lbl">SUM UP!</span><span class="beta" title="SUM UP! is in beta: loop detection is still being tuned">Beta</span><span class="count" id="segLoops">0</span>
+      </button>
+      <button type="button" role="tab" id="tab-reports" aria-selected="false" aria-controls="view-reports" data-view="reports">
+        <svg class="od-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>
+        <span class="lbl">Reports</span>
+      </button>
+      <button type="button" role="tab" id="tab-settings" aria-selected="false" aria-controls="view-settings" data-view="settings">
+        <svg class="od-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.4M12 18.8v2.4M4.8 12H2.4M21.6 12h-2.4M6.9 6.9 5.2 5.2M18.8 18.8l-1.7-1.7M17.1 6.9l1.7-1.7M5.2 18.8l1.7-1.7"/></svg>
+        <span class="lbl">Settings</span>
+      </button>
+    </div>
+
+    <div class="title-right">
+      <button type="button" class="ai-chip" id="aiChip" data-on="false" aria-describedby="aiChipHint">
+        <span class="dot" aria-hidden="true"></span><span id="aiChipLabel">Claude not connected</span>
+      </button>
+      <span id="aiChipHint" class="vh">Opens Settings</span>
+      <button type="button" class="icon-btn" id="panelToggle" aria-pressed="true" aria-label="Toggle AI panel" title="Toggle AI panel">
+        <svg class="od-icon" style="--od-icon-size:17px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ===== body ===== -->
+  <div class="shell" style="position:relative">
+
+    <!-- account rail -->
+    <nav class="rail" aria-label="Linked WhatsApp accounts">
+      <div class="rail-scroll" id="rail"></div>
+      <div class="rail-foot">
+        <button type="button" class="rail-act" id="addAccount" aria-label="Link another WhatsApp account" title="Link another account">
+          <svg class="od-icon" style="--od-icon-size:19px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <button type="button" class="rail-act solid" id="railSettings" aria-label="Open Settings" title="Settings">
+          <svg class="od-icon" style="--od-icon-size:18px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.4M12 18.8v2.4M4.8 12H2.4M21.6 12h-2.4M6.9 6.9 5.2 5.2M18.8 18.8l-1.7-1.7M17.1 6.9l1.7-1.7M5.2 18.8l1.7-1.7"/></svg>
+        </button>
+      </div>
+    </nav>
+
+    <!-- ========== INBOX ========== -->
+    <section class="view" id="view-inbox" role="tabpanel" aria-labelledby="tab-inbox">
+      <div class="inbox">
+
+        <!-- chat list -->
+        <div class="pane list">
+          <div class="list-head">
+            <p class="list-acct" id="listAcct"></p>
+            <label class="search">
+              <span class="vh">Search chats and messages</span>
+              <span class="ic" aria-hidden="true"><svg class="od-icon" style="--od-icon-size:15px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/></svg></span>
+              <input type="text" id="search" placeholder="Search chats and messages" autocomplete="off" spellcheck="false">
+              <button type="button" class="icon-btn clr" id="searchClear" aria-label="Clear search" hidden>
+                <svg class="od-icon" style="--od-icon-size:14px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+              </button>
+            </label>
+            <div class="chips" role="group" aria-label="Filter chats">
+              <button type="button" class="chip" data-filter="all" aria-pressed="true">All</button>
+              <button type="button" class="chip" data-filter="pinned" aria-pressed="false">Pinned</button>
+              <button type="button" class="chip" data-filter="needsreply" aria-pressed="false">Needs reply</button>
+              <button type="button" class="chip" data-filter="waiting" aria-pressed="false">Waiting on them</button>
+            </div>
+          </div>
+          <div class="rows" id="rows"></div>
+        </div>
+
+        <!-- conversation -->
+        <div class="pane convo" id="convo"></div>
+
+        <!-- AI panel -->
+        <aside class="pane panel" id="panel" aria-label="AI summary panel">
+          <div class="panel-head">
+            <button type="button" class="icon-btn mob-back" id="panelClose" aria-label="Close AI panel">
+              <svg class="od-icon" style="--od-icon-size:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+            </button>
+            <h2 class="od-fill">AI assistant</h2>
+            <span class="kv" id="panelModel">—</span>
+          </div>
+          <div class="panel-body" id="panelBody"></div>
+        </aside>
+
+        <button type="button" class="scrim" id="panelScrim" aria-label="Close AI panel" hidden></button>
+      </div>
+    </section>
+
+    <!-- ========== OPEN LOOPS ========== -->
+    <section class="view loops" id="view-loops" role="tabpanel" aria-labelledby="tab-loops" hidden>
+      <div class="loops-wrap">
+        <header>
+          <h1>SUM UP! <span class="beta beta-lg">Beta</span></h1>
+          <p>Every unanswered question and pending confirmation across all your linked numbers, with the side that is holding it up. Reading a chat does not clear a loop; only answering it does.</p>
+        </header>
+        <div class="loop-ctl">
+          <label class="f">
+            <span class="lb">Number</span>
+            <select id="loopAcct"></select>
+          </label>
+          <label class="f">
+            <span class="lb">Type</span>
+            <select id="loopType"></select>
+          </label>
+          <label class="f">
+            <span class="lb">Group by</span>
+            <select id="loopGroup">
+              <option value="direction" selected>Who is holding it</option>
+              <option value="age">Age</option>
+              <option value="account">Number</option>
+              <option value="partner">Partner</option>
+              <option value="ptype">Partner type</option>
+              <option value="service">Service</option>
+              <option value="chat">Chat</option>
+            </select>
+          </label>
+          <span class="od-fill"></span>
+          <button type="button" class="chip" id="showClosed" aria-pressed="false">Show closed and snoozed</button>
+          <button type="button" class="btn btn-sm" id="loopReport">Report this</button>
+        </div>
+        <p class="loop-note" id="loopScope" hidden></p>
+        <div class="loop-list" id="loopRows"></div>
+      </div>
+    </section>
+
+    <!-- ========== REPORTS ========== -->
+    <section class="view" id="view-reports" role="tabpanel" aria-labelledby="tab-reports" hidden>
+      <div class="reports">
+        <div class="rep-list">
+          <div class="rep-head">
+            <button type="button" class="btn btn-primary" id="newReport">
+              <svg class="od-icon" style="--od-icon-size:15px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              New report
+            </button>
+            <p class="kv" id="repCount">No reports yet</p>
+          </div>
+          <div class="rep-rows" id="repRows"></div>
+        </div>
+        <div class="rep-doc" id="repDoc"></div>
+      </div>
+    </section>
+
+    <!-- ========== AI SETUP ========== -->
+    <section class="view settings" id="view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+      <div class="set-wrap">
+        <header>
+          <h1>Settings</h1>
+          <p>Claude, auto summary and notifications. WA Turbo reads your chats locally and sends only the selected messages to the model you connect here.</p>
+        </header>
+
+        <div class="fs">
+          <h2>Claude connection</h2>
+          <div class="prov" role="radiogroup" aria-label="How WA Turbo reaches Claude">
+            <label class="prov-opt">
+              <input type="radio" name="provider" value="claude-code" checked>
+              <span><b>Claude Code login</b><span class="kv">Uses your Claude plan. No separate billing.</span></span>
+            </label>
+            <label class="prov-opt">
+              <input type="radio" name="provider" value="api">
+              <span><b>Anthropic API key</b><span class="kv">Billed separately, per token.</span></span>
+            </label>
+          </div>
+
+          <div class="prov-box" id="ccBox">
+            <p class="hint">WA Turbo runs the Claude Code app already signed in on this Mac, with every tool switched off: it can only read the messages you pick and answer. Runs count against your Claude plan's usage limits and are not saved to Claude Code's history.</p>
+            <div class="od-row" style="--od-gap:8px">
+              <button type="button" class="btn btn-primary" id="checkCc">Check again</button>
+              <span class="od-fill"></span>
+              <span class="kv" id="ccState">Not connected</span>
+            </div>
+            <div class="banner ok" id="ccOk" hidden>
+              <svg class="od-icon" style="--od-icon-size:16px;margin-top:1px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>
+              <span><b>Signed in as <span id="ccAccount"></span>.</b> Summaries and reports run on your Claude plan.</span>
+            </div>
+            <div class="banner warn" id="ccSignedOut" hidden>
+              <svg class="od-icon" style="--od-icon-size:16px;margin-top:1px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0"/></svg>
+              <span><b>Claude Code isn't signed in.</b> Open Terminal, run <code>claude</code>, type <code>/login</code>, then press Check again.</span>
+            </div>
+            <div class="banner warn" id="ccMissing" hidden>
+              <svg class="od-icon" style="--od-icon-size:16px;margin-top:1px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0"/></svg>
+              <span><b>Claude Code isn't installed.</b> Install it with <code>brew install --cask claude-code</code> (or from claude.com/claude-code), sign in with <code>claude</code>, then press Check again.</span>
+            </div>
+          </div>
+
+          <div class="prov-box" id="keyBox" hidden>
+          <p class="hint">Paste an Anthropic API key. It stays on this Mac and is never sent anywhere except Anthropic.</p>
+          <div class="inline-row">
+            <label class="f">
+              <span class="lb">Anthropic API key <span class="req" aria-hidden="true">*</span><span class="vh">required</span></span>
+              <input type="password" id="apiKey" class="mono" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" aria-describedby="apiKeyHelp apiKeyErr">
+              <span class="hp" id="apiKeyHelp">Create one at console.anthropic.com → API keys.</span>
+            </label>
+            <button type="button" class="btn" id="keyReveal" aria-pressed="false" aria-label="Show API key">Show</button>
+          </div>
+          <p class="err" id="apiKeyErr" hidden></p>
+          <div class="od-row" style="--od-gap:8px">
+            <button type="button" class="btn btn-primary" id="testKey">Test connection</button>
+            <button type="button" class="btn" id="disconnectKey" hidden>Disconnect</button>
+            <span class="od-fill"></span>
+            <span class="kv" id="keyState">Not connected</span>
+          </div>
+          <div class="banner ok" id="keyOk" hidden>
+            <svg class="od-icon" style="--od-icon-size:16px;margin-top:1px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>
+            <span><b>Connected.</b> Summaries and reports are available in the inbox and the Reports tab.</span>
+          </div>
+          </div>
+        </div>
+
+        <div class="fs">
+          <h2>Model</h2>
+          <label class="f">
+            <span class="lb">Summarization model</span>
+            <select id="model">
+              <option value="claude-haiku-5-5" selected>Claude Haiku 5.5 — fastest and cheapest, default</option>
+              <option value="claude-sonnet-5-5">Claude Sonnet 5.5 — balanced</option>
+              <option value="claude-opus-5-5">Claude Opus 5.5 — deepest reading, slowest</option>
+            </select>
+            <span class="hp">Through Claude Code, runs use your plan's limits; Opus uses them fastest. With an API key, Haiku 5.5 costs $0.10 / $0.50 per million tokens in and out. Client-facing summaries read better on Opus.</span>
+          </label>
+          <label class="f">
+            <span class="lb">Summarize reads</span>
+            <select id="window" aria-describedby="windowHelp">
+              <option value="week" selected>This week (Monday to now)</option>
+              <option value="50">Last 50 messages</option>
+              <option value="100">Last 100 messages</option>
+              <option value="300">Last 300 messages</option>
+            </select>
+            <span class="hp" id="windowHelp">What the Summarize button reads. This week starts Monday 00:00 on this Mac's clock and reads at most the newest 300. Only these messages are sent: their text, and the most recent photos if allowed below.</span>
+          </label>
+          <label class="ck-row"><input type="checkbox" id="aiImages" checked> <span>Let Claude see photos in the chat (the 10 most recent per chat)</span></label>
+          <p class="hint" style="margin-top:-8px">Photos are sent as they are, so a phone number or name inside a photo is not hidden. Turn this off to send text only.</p>
+        </div>
+
+        <div class="fs" id="usageBlock">
+          <div class="usage-head">
+            <h2 class="od-fill">Claude usage</h2>
+            <div class="usage-seg" role="group" aria-label="Show usage by">
+              <button type="button" class="chip" data-usage="day" aria-pressed="true">Daily</button>
+              <button type="button" class="chip" data-usage="week" aria-pressed="false">Weekly</button>
+            </div>
+          </div>
+          <p class="hint">Tokens Claude read and wrote for each number: input, cached input and output together. Through the Claude Code login they count toward your plan's limits, with no separate bill.</p>
+          <div class="usage-tiles" id="usageTiles"></div>
+          <div class="usage-legend" id="usageLegend"></div>
+          <div class="usage-chart" id="usageChart"></div>
+          <div class="usage-table-wrap"><table class="usage-table" id="usageTable"></table></div>
+          <p class="hint" id="usageNote" style="margin-top:-6px"></p>
+        </div>
+
+        <div class="fs" id="autoBlock">
+          <h2>Auto summary</h2>
+          <p class="hint">WA Turbo summarizes chats on its own when they have new messages. Pinned chats get a fresh summary in the AI panel; other chats get their SUM UP! loops checked. A chat with nothing new is never sent to Claude.</p>
+          <label class="ck-row"><input type="checkbox" id="autoOn" checked> <span>Summarize chats automatically</span></label>
+          <div class="auto-grid">
+            <span class="lbl"><b>Pinned chats</b><span id="autoPinned">No pinned chats</span></span>
+            <label><span class="vh">How often for pinned chats</span><select id="pinEveryMin">
+              <option value="2">Every 2 minutes</option><option value="5" selected>Every 5 minutes</option><option value="10">Every 10 minutes</option>
+              <option value="15">Every 15 minutes</option><option value="30">Every 30 minutes</option><option value="60">Every hour</option></select></label>
+            <label><span class="vh">Messages read for pinned chats</span><select id="pinWindow">
+              <option value="5">Last 5 messages</option><option value="10" selected>Last 10 messages</option><option value="20">Last 20 messages</option>
+              <option value="50">Last 50 messages</option><option value="100">Last 100 messages</option></select></label>
+            <span class="lbl"><b>Other chats</b><span>only when they have new messages</span></span>
+            <label><span class="vh">How often for other chats</span><select id="otherEveryMin">
+              <option value="30">Every 30 minutes</option><option value="60" selected>Every hour</option><option value="180">Every 3 hours</option>
+              <option value="360">Every 6 hours</option><option value="720">Every 12 hours</option><option value="1440">Every 24 hours</option><option value="0">Off</option></select></label>
+            <label><span class="vh">Messages read for other chats</span><select id="otherWindow">
+              <option value="2" selected>Last 2 messages</option><option value="5">Last 5 messages</option><option value="10">Last 10 messages</option>
+              <option value="20">Last 20 messages</option><option value="50">Last 50 messages</option></select></label>
+          </div>
+          <p class="kv" id="autoState" role="status">Checking…</p>
+          <p class="hint" style="margin-top:-8px">Runs on your Claude plan, one chat at a time, pinned first. Pauses for 30 minutes if the plan reaches its usage limit. Groups you never write in are skipped unless pinned.</p>
+        </div>
+
+        <div class="fs" id="notifyBlock">
+          <h2>Notifications</h2>
+          <p class="hint">Banners for new messages while WA Turbo is running. Pinned chats are louder: every message, their own sound, a Dock bounce until you look, and a reminder if you leave them unread. Muting a chat here (right-click it) doesn't change WhatsApp on your phone.</p>
+          <label class="ck-row"><input type="checkbox" id="notifyOn" checked> <span>Show notifications for new messages</span></label>
+          <div class="auto-grid">
+            <span class="lbl"><b>Pinned chats</b><span>Every message, groups too</span></span>
+            <label><span class="vh">Sound for pinned chats</span><select id="notifyPinnedSound"><option value="Glass" selected>Sound: Glass</option><option value="Hero">Sound: Hero</option><option value="Ping">Sound: Ping</option><option value="Submarine">Sound: Submarine</option><option value="Funk">Sound: Funk</option><option value="Blow">Sound: Blow</option><option value="None">No sound</option></select></label>
+            <label><span class="vh">Reminder for unread pinned chats</span><select id="notifyRemindMin">
+              <option value="0">No reminder</option><option value="5">Remind after 5 min unread</option><option value="10" selected>Remind after 10 min unread</option><option value="30">Remind after 30 min unread</option></select></label>
+            <span class="lbl"><b>Other chats</b><span>One banner per chat every 2 minutes</span></span>
+            <label><span class="vh">Which messages notify for other chats</span><select id="notifyOthers">
+              <option value="all">All messages</option><option value="direct" selected>Direct chats + group mentions</option><option value="mentions">Mentions and replies only</option><option value="off">Off</option></select></label>
+            <label><span class="vh">Sound for other chats</span><select id="notifyOtherSound"><option value="Tink" selected>Sound: Tink</option><option value="Pop">Sound: Pop</option><option value="Bottle">Sound: Bottle</option><option value="Purr">Sound: Purr</option><option value="Morse">Sound: Morse</option><option value="None">No sound</option></select></label>
+            <span class="lbl"><b>Dock badge and pause</b><span>Badge counts all numbers</span></span>
+            <label><span class="vh">Dock badge</span><select id="notifyBadge">
+              <option value="chats" selected>Badge: unread chats</option><option value="messages">Badge: unread messages</option><option value="pinned">Badge: unread pinned chats</option><option value="off">No badge</option></select></label>
+            <label><span class="vh">Pause notifications</span><select id="notifyPause"></select></label>
+          </div>
+          <label class="ck-row"><input type="checkbox" id="notifyPreview" checked> <span>Show message text in banners</span></label>
+          <label class="ck-row"><input type="checkbox" id="notifyOverdue" checked> <span>Tell me when a pinned chat has waited too long for my reply</span></label>
+          <label class="ck-row"><input type="checkbox" id="menuBar" checked> <span>Show WA Turbo in the menu bar, with how many pinned chats are waiting on my reply</span></label>
+          <div class="od-row" style="--od-gap:8px">
+            <button type="button" class="btn btn-sm" id="testNotify">Send a test notification</button>
+            <button type="button" class="btn btn-sm" id="openNotifySettings">Open macOS notification settings</button>
+          </div>
+          <p class="hint" style="margin-top:-8px">The first banner asks macOS for permission. If nothing appears, allow WA Turbo in macOS notification settings. Whether banners slide away or stay until closed is set there too, for the whole app.</p>
+        </div>
+
+        <div class="fs" id="teamBlock">
+          <h2>My team</h2>
+          <p class="hint">People on your side in group chats. When a teammate asks the other party something, SUM UP! shows it as <b>Waiting on them</b>, and a teammate's answer counts as yours. In direct chats nothing changes. Add someone by right-clicking one of their messages in a group.</p>
+          <ul class="team-list" id="teamList"></ul>
+        </div>
+
+        <div class="fs">
+          <h2>Report presets</h2>
+          <p class="hint">Each preset is a prompt. Edit the custom one to match how you actually brief your team.</p>
+          <div id="presetEditor" class="od-stack" style="--od-gap:9px"></div>
+          <label class="f">
+            <span class="lb">Custom prompt</span>
+            <textarea class="ta" id="customPrompt" placeholder="e.g. Pull every price quoted this week, who quoted it, and whether we replied."></textarea>
+            <span class="hp">Used by the “Custom brief” preset.</span>
+          </label>
+        </div>
+
+        <div class="fs">
+          <h2>On this Mac</h2>
+          <label class="ck-row"><input type="checkbox" id="openAtLogin"> <span>Open WA Turbo at login, so every number keeps receiving after a restart</span></label>
+          <p class="hint">Closing the window keeps WA Turbo running in the Dock. Quit it with ⌘Q.</p>
+        </div>
+
+        <div class="fs" id="faqBlock" tabindex="-1">
+          <h2>FAQ</h2>
+          <p class="hint">How WA Turbo behaves, in plain terms.</p>
+          <div class="faq-glance">
+            <div><b>Sent to Claude</b><span>Message text and the most recent photos, inside the window you choose.</span></div>
+            <div><b>Never sent to Claude</b><span>Voice notes, videos, documents, stickers and locations.</span></div>
+            <div><b>Sent to WhatsApp</b><span>Only what you type or attach and send yourself.</span></div>
+          </div>
+          <div class="faq" style="margin-top:9px">
+            <details open>
+              <summary>What does the AI actually read?</summary>
+              <div class="fa">
+                <p><b>Text and photos.</b> When you summarize a chat or build a report, WA Turbo sends the message text inside the window you chose, plus up to the 10 most recent photos in that chat, so a transfer receipt or a screenshot of an error counts as part of the conversation. Photos the AI can see are tagged “Read by AI” in the chat.</p>
+                <p><b>Everything else stays a placeholder.</b> Voice notes, videos, documents, stickers and location pins are never sent; the model only sees that one was there. Turn photos off in the Model section above if you would rather send text only.</p>
+              </div>
+            </details>
+            <details>
+              <summary>Can I keep a photo from a chat?</summary>
+              <div class="fa">
+                <p>Yes. Every photo and file in a chat has a save button, and the full-size viewer has Save to this Mac. Opened photos are also kept in WA Turbo's own folder so they load instantly next time.</p>
+              </div>
+            </details>
+            <details>
+              <summary>Where do my messages go?</summary>
+              <div class="fa">
+                <p>Chats stay on this Mac, in your local Postgres database. Only what you select for a summary or report is sent, to Anthropic, either through the Claude Code app signed in on this Mac or with the API key you entered — there is no WA Turbo server in between. Phone numbers in the text are swapped for stable aliases before the request leaves the Mac. Photos are sent as they are, so a number or name inside a photo is not hidden. Generated reports are written locally and are not synced anywhere.</p>
+              </div>
+            </details>
+            <details>
+              <summary>Can WA Turbo send a message?</summary>
+              <div class="fa">
+                <p><b>Only when you send it.</b> Type in the box under a chat, or attach a photo, and press Send or Enter. Nothing is ever sent on its own: no automatic replies, no scheduled messages, and Claude never writes or sends a message. WA Turbo also never sends read receipts or your online status. Nudge in SUM UP! only records that you followed up.</p>
+              </div>
+            </details>
+            <details>
+              <summary>How does SUM UP! find open loops?</summary>
+              <div class="fa">
+                <p>Simple rules run on this Mac as messages arrive: a question or request to you, your own ask, or your own promise. Nothing is sent anywhere to do that. Those loops carry an "auto" tag and a Not a loop button. When you summarize the chat, Claude reviews them and can dismiss false ones.</p>
+                <p>The rules also close loops on their own: when you replied and the other side then said thanks, ok or noted, the loop closes and says why. The same question sent twice counts as one loop they chased.</p>
+              </div>
+            </details>
+            <details>
+              <summary>Does opening a chat clear an open loop?</summary>
+              <div class="fa">
+                <p>No, and that is deliberate. Read state and reply debt are separate: a loop closes when it is answered, never because you looked at the thread. That is the whole reason a chat you read on Monday still shows up in SUM UP! on Friday.</p>
+              </div>
+            </details>
+            <details>
+              <summary>Can one number see another number's chats?</summary>
+              <div class="fa">
+                <p>No. Each linked number keeps its own session and its own inbox, and there is no merged chat list. SUM UP! is the only place they are counted together, and every row there links back to the chat inside its own number.</p>
+              </div>
+            </details>
+            <details>
+              <summary>What restarts the waiting clock?</summary>
+              <div class="fa">
+                <p>A nudge. Total waiting time keeps counting from the original question, but the SLA clock restarts from your last follow-up — so "asked 4 days ago, chased an hour ago" and "asked 4 days ago, never chased" do not look the same.</p>
+              </div>
+            </details>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- ===== pair account dialog ===== -->
+<dialog id="dlgPair" aria-labelledby="pairTitle">
+  <form class="sheet" method="dialog">
+    <header>
+      <div class="od-fill">
+        <h2 id="pairTitle">Link another account</h2>
+        <p>Open WhatsApp on your phone → Settings → Linked devices → Link a device.</p>
+      </div>
+      <button type="button" class="icon-btn" data-close aria-label="Close">
+        <svg class="od-icon" style="--od-icon-size:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </header>
+    <div class="bd" id="pairBody"></div>
+    <footer>
+      <button type="button" class="btn" id="pairRefresh" hidden>Refresh code</button>
+      <span class="od-fill"></span>
+      <button type="button" class="btn" id="pairCancel">Cancel</button>
+      <button type="button" class="btn btn-primary" id="pairNext">Show QR code</button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- ===== new report dialog ===== -->
+<dialog id="dlgReport" aria-labelledby="repTitle">
+  <form class="sheet" method="dialog">
+    <header>
+      <div class="od-fill">
+        <h2 id="repTitle">New report</h2>
+        <p>Pick the chats, the window, and what you want out of them.</p>
+      </div>
+      <button type="button" class="icon-btn" data-close aria-label="Close">
+        <svg class="od-icon" style="--od-icon-size:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </header>
+    <div class="bd">
+      <div class="banner bad" id="repNoKey" hidden>
+        <svg class="od-icon" style="--od-icon-size:16px;margin-top:1px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v5M12 17.5v.01"/><circle cx="12" cy="12" r="9"/></svg>
+        <span><b>Claude is not connected.</b> Sign in to Claude Code or add an API key in Settings, then generate.</span>
+      </div>
+      <div class="inline-row">
+        <label class="f">
+          <span class="lb">Report type</span>
+          <select id="repPreset"></select>
+        </label>
+        <label class="f">
+          <span class="lb">Window</span>
+          <select id="repRange">
+            <option value="1">Last 24 hours</option>
+            <option value="7" selected>Last 7 days</option>
+            <option value="30">Last 30 days</option>
+          </select>
+        </label>
+      </div>
+      <label class="f" id="repCustomWrap" hidden>
+        <span class="lb">Custom prompt <span class="req" aria-hidden="true">*</span><span class="vh">required</span></span>
+        <textarea class="ta" id="repCustom" placeholder="What should Claude pull out of these chats?" aria-describedby="repCustomErr"></textarea>
+        <p class="err" id="repCustomErr" hidden></p>
+      </label>
+      <div>
+        <div class="od-row" style="--od-gap:8px;margin-bottom:8px">
+          <span class="lb od-fill" style="font-size:12.5px;font-weight:600;color:var(--ink-2)">Chats to include <span class="req" aria-hidden="true">*</span></span>
+          <button type="button" class="btn btn-sm" id="repSelectAll">Select all</button>
+          <button type="button" class="btn btn-sm" id="repSelectNone">Clear</button>
+        </div>
+        <div class="pick" id="repPick"></div>
+        <p class="err" id="repPickErr" hidden></p>
+        <p class="kv" style="margin-top:8px">Reports read message text and recent photos. Voice notes, videos and documents are never sent to the model.</p>
+      </div>
+    </div>
+    <footer>
+      <span class="kv od-fill" id="repSummary">No chats selected</span>
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="button" class="btn btn-primary" id="repGenerate">Generate report</button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- ===== export dialog ===== -->
+<dialog id="dlgExport" aria-labelledby="expTitle">
+  <form class="sheet" method="dialog">
+    <header>
+      <div class="od-fill">
+        <h2 id="expTitle">Markdown export</h2>
+        <p id="expSub"></p>
+      </div>
+      <button type="button" class="icon-btn" data-close aria-label="Close">
+        <svg class="od-icon" style="--od-icon-size:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </header>
+    <div class="bd"><div class="md-out" id="expOut" tabindex="0" role="textbox" aria-readonly="true" aria-label="Report markdown"></div></div>
+    <footer>
+      <button type="button" class="btn" id="expCopy">Copy markdown</button>
+      <span class="od-fill"></span>
+      <button type="button" class="btn btn-primary" data-close>Done</button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- ===== confirm dialog ===== -->
+<dialog id="dlgConfirm" aria-labelledby="cfTitle">
+  <form class="sheet" method="dialog" style="max-width:420px">
+    <header><div class="od-fill"><h2 id="cfTitle">Delete report</h2><p id="cfBody">This cannot be undone.</p></div></header>
+    <footer>
+      <span class="od-fill"></span>
+      <button type="button" class="btn" data-close>Keep it</button>
+      <button type="button" class="btn btn-danger" id="cfGo">Delete</button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- ===== partner tag dialog ===== -->
+<dialog id="dlgPartner" aria-labelledby="ptTitle">
+  <form class="sheet" method="dialog" style="max-width:420px">
+    <header>
+      <div class="od-fill">
+        <h2 id="ptTitle">Partner, service and stage</h2>
+        <p id="ptSub">Tagging a group also lets local rules scan it for open loops.</p>
+      </div>
+      <button type="button" class="icon-btn" data-close aria-label="Close">
+        <svg class="od-icon" style="--od-icon-size:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </header>
+    <div class="bd">
+      <label class="f"><span class="lb">Partner</span><input type="text" id="ptPartner" list="ptPartners" maxlength="40" autocomplete="off" placeholder="Company or person this chat is with"><datalist id="ptPartners"></datalist></label>
+      <label class="f"><span class="lb">Type</span><input type="text" id="ptType" list="ptTypes" maxlength="24" autocomplete="off" placeholder="e.g. Customer, Supplier, Agency"><datalist id="ptTypes"></datalist></label>
+      <label class="f"><span class="lb">Service</span><input type="text" id="ptService" maxlength="48" autocomplete="off" placeholder="What you work on together (optional)"></label>
+      <label class="f"><span class="lb">Stage</span><input type="text" id="ptStage" list="ptStages" maxlength="32" autocomplete="off" placeholder="Where it stands (optional)"><datalist id="ptStages"></datalist></label>
+    </div>
+    <footer>
+      <button type="button" class="btn" id="ptRemove">Remove tag</button>
+      <span class="od-fill"></span>
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="button" class="btn btn-primary" id="ptSave">Save</button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- ===== unlink confirm reuses dlgConfirm ===== -->
+
+<!-- ===== database unreachable ===== -->
+<div class="db-screen" id="dbScreen" hidden>
+  <div class="db-card">
+    <span class="db-glyph" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5.5" rx="7.5" ry="2.8"/><path d="M4.5 5.5v13c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8v-13M4.5 12c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8"/></svg></span>
+    <h2>Can't reach Postgres</h2>
+    <p id="dbError">WA Turbo keeps your chats in your local PostgreSQL 17.</p>
+    <div class="db-cmd mono">sudo launchctl load -w /Library/LaunchDaemons/postgresql-17.plist</div>
+    <label class="f" style="width:100%">
+      <span class="lb">Connection string</span>
+      <input type="text" id="dbUrl" class="mono" spellcheck="false" autocomplete="off" placeholder="postgres://wa_turbo:password@localhost:5432/wa_turbo">
+      <span class="hp">Saved on this Mac only, in ~/Library/Application Support/WA Turbo/config.json.</span>
+    </label>
+    <div class="od-row" style="--od-gap:8px">
+      <button type="button" class="btn" id="dbSave">Save and connect</button>
+      <button type="button" class="btn btn-primary" id="dbRetry">Try again</button>
+    </div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+
+<script type="module" src="./app.ts"></script>
+</body>
+</html>
