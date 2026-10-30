@@ -9,6 +9,8 @@ files:
 extraResources:
   - from: migrations
     to: migrations
+  - from: vendor/postgres      # built by scripts/prepare-postgres.mjs
+    to: postgres
 mac:
   target:
     - target: dmg

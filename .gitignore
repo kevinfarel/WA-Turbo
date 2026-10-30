@@ -4,3 +4,4 @@ dist/
 *.log
 .DS_Store
 WA-Turbo-Mac-App.zip
+vendor/

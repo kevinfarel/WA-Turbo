@@ -2,8 +2,9 @@ import { app, BrowserWindow, nativeTheme, net, protocol, shell } from 'electron'
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { databaseUrl, migrationsDir } from './config';
+import { dbPassword, dbTools, externalDatabaseUrl, migrationsDir } from './config';
 import { connect, disconnect, migrate } from './db/client';
+import { pgServer, PgServerError } from './db/server';
 import { chatMeta, chatsWithOpenLoops, getSettings, lastSummary, listAccounts, listLoops, listPartners, messageMedia, saveSettings } from './db/queries';
 import { resolveLoops } from './loops/service';
 import { initMedia, loadMedia, MediaError } from './media';
@@ -29,7 +30,8 @@ let win: BrowserWindow | null = null;
 async function boot(): Promise<{ ok: boolean; error: string | null }> {
   manager.stopAll();
   try {
-    await connect(databaseUrl());
+    const external = externalDatabaseUrl();
+    await connect(external ?? await pgServer.start({ tcp: dbTools(), password: dbPassword() }));
     await migrate(migrationsDir());
     dbState = { ok: true, error: null };
     // Re-check loops stored before the current rules (a thanks after your reply closes them).
@@ -46,8 +48,9 @@ async function boot(): Promise<{ ok: boolean; error: string | null }> {
 
 function describeDbError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
+  if (e instanceof PgServerError) return msg;
   const code = (e as { code?: string }).code;
-  if (code === 'ECONNREFUSED' || /ECONNREFUSED/.test(msg)) return "Postgres isn't answering on localhost:5432.";
+  if (code === 'ECONNREFUSED' || /ECONNREFUSED|ENOENT/.test(msg)) return "WA Turbo's database isn't answering.";
   if (code === '28P01' || /password authentication failed/i.test(msg)) return 'Postgres rejected the user or password in the connection string.';
   if (/no password supplied|SASL/i.test(msg)) return 'Postgres wants a password. Add it to the connection string.';
   if (code === '3D000') return 'The wa_turbo database does not exist yet.';
@@ -159,4 +162,15 @@ app.whenReady().then(async () => {
 // Closing the window keeps WA Turbo running so every number keeps receiving.
 app.on('window-all-closed', () => { /* stay in the Dock */ });
 app.on('activate', () => { if (!win) createWindow(); });
-app.on('before-quit', () => { autoSummary.stop(); notifier.stop(); manager.stopAll(); void disconnect(); });
+// Quitting waits for the built-in Postgres to shut down cleanly; a force quit leaves it running for the next launch to adopt.
+let quitting = false;
+app.on('before-quit', e => {
+  if (quitting) return;
+  quitting = true;
+  e.preventDefault();
+  autoSummary.stop(); notifier.stop(); manager.stopAll();
+  void disconnect()
+    .then(() => (externalDatabaseUrl() ? undefined : pgServer.stop()))
+    .catch(err => console.error('Database shutdown:', err))
+    .finally(() => app.quit());
+});

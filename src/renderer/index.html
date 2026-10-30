@@ -332,6 +332,16 @@
           <ul class="team-list" id="teamList"></ul>
         </div>
 
+        <div class="fs" id="dbBlock">
+          <h2>Database</h2>
+          <p class="hint">Chats, SUM UP! cards, reports and settings are kept in a PostgreSQL database built into WA Turbo, in a folder on this Mac. Nothing needs installing and nothing is stored anywhere else.</p>
+          <p class="db-facts" id="dbFacts">Checking…</p>
+          <label class="ck-row"><input type="checkbox" id="dbTools"> <span>Let database tools on this Mac connect (DBeaver, TablePlus)</span></label>
+          <dl class="db-access" id="dbAccess" hidden></dl>
+          <p class="hint" id="dbToolsHint">Only programs on this Mac can connect, and only with the password shown here. Switching this restarts the database for a moment; WhatsApp reconnects by itself.</p>
+          <div class="od-row" style="--od-gap:8px"><button type="button" class="btn btn-sm" id="dbFolder">Show database folder</button></div>
+        </div>
+
         <div class="fs">
           <h2>Report presets</h2>
           <p class="hint">Each preset is a prompt. Edit the custom one to match how you actually brief your team.</p>
@@ -374,7 +384,7 @@
             <details>
               <summary>Where do my messages go?</summary>
               <div class="fa">
-                <p>Chats stay on this Mac, in your local Postgres database. Only what you select for a summary or report is sent, to Anthropic, either through the Claude Code app signed in on this Mac or with the API key you entered — there is no WA Turbo server in between. Phone numbers in the text are swapped for stable aliases before the request leaves the Mac. Photos are sent as they are, so a number or name inside a photo is not hidden. Generated reports are written locally and are not synced anywhere.</p>
+                <p>Chats stay on this Mac, in the database built into WA Turbo. Only what you select for a summary or report is sent, to Anthropic, either through the Claude Code app signed in on this Mac or with the API key you entered — there is no WA Turbo server in between. Phone numbers in the text are swapped for stable aliases before the request leaves the Mac. Photos are sent as they are, so a number or name inside a photo is not hidden. Generated reports are written locally and are not synced anywhere.</p>
               </div>
             </details>
             <details>
@@ -558,16 +568,11 @@
 <div class="db-screen" id="dbScreen" hidden>
   <div class="db-card">
     <span class="db-glyph" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5.5" rx="7.5" ry="2.8"/><path d="M4.5 5.5v13c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8v-13M4.5 12c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8"/></svg></span>
-    <h2>Can't reach Postgres</h2>
-    <p id="dbError">WA Turbo keeps your chats in your local PostgreSQL 17.</p>
-    <div class="db-cmd mono">sudo launchctl load -w /Library/LaunchDaemons/postgresql-17.plist</div>
-    <label class="f" style="width:100%">
-      <span class="lb">Connection string</span>
-      <input type="text" id="dbUrl" class="mono" spellcheck="false" autocomplete="off" placeholder="postgres://wa_turbo:password@localhost:5432/wa_turbo">
-      <span class="hp">Saved on this Mac only, in ~/Library/Application Support/WA Turbo/config.json.</span>
-    </label>
+    <h2>WA Turbo's database didn't start</h2>
+    <p id="dbError">WA Turbo keeps your chats in a database built into the app, on this Mac.</p>
+    <pre class="db-cmd mono" id="dbLog" hidden></pre>
     <div class="od-row" style="--od-gap:8px">
-      <button type="button" class="btn" id="dbSave">Save and connect</button>
+      <button type="button" class="btn" id="dbShow">Show database folder</button>
       <button type="button" class="btn btn-primary" id="dbRetry">Try again</button>
     </div>
   </div>

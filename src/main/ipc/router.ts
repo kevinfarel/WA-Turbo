@@ -3,10 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 import type { Api, EventKey, Events } from '@shared/ipc';
-import type { AiProvider, AiStatus, Bootstrap, Loop } from '@shared/types';
-import { getApiKey, setApiKey, setDatabaseUrl } from '../config';
+import type { AiProvider, AiStatus, Bootstrap, DbInfo, Loop } from '@shared/types';
+import { dbPassword, dbTools, externalDatabaseUrl, getApiKey, setApiKey, setDbTools } from '../config';
 import * as Q from '../db/queries';
-import { isConnected } from '../db/client';
+import { isConnected, q1 } from '../db/client';
+import { pgHome, pgServer, portFree, PG_PORT, TOOLS_HOST } from '../db/server';
 import { flagMessage, loopAction, resolveLoops } from '../loops/service';
 import { resetClient, testKey } from '../ai/client';
 import { claudeCodeStatus, forgetClaude } from '../ai/claude-code';
@@ -96,6 +97,13 @@ export function registerIpc(d: RouterDeps): void {
   const keyOf = (m: NonNullable<Awaited<ReturnType<typeof Q.messageForChange>>>) =>
     ({ remoteJid: m.key?.remoteJid || m.jid, id: m.wa_id, fromMe: true, ...(m.key?.participant ? { participant: m.key.participant } : {}) });
 
+  const dbInfo = async (): Promise<DbInfo> => {
+    const size = isConnected() ? await q1<{ n: number }>('SELECT pg_database_size(current_database()) AS n').catch(() => null) : null;
+    if (externalDatabaseUrl()) return { mode: 'external', version: null, folder: null, sizeBytes: size?.n ?? null, toolsOn: false, tools: null, toolsError: null };
+    return { mode: 'bundled', version: pgServer.version(), folder: pgHome(), sizeBytes: size?.n ?? null, toolsOn: dbTools(),
+      tools: pgServer.tools(dbPassword()), toolsError: pgServer.toolsError };
+  };
+
   /** After the team changes: let replies from teammates settle open loops, then refresh the window. */
   const teamSettled = async () => {
     for (const chatId of await Q.chatsWithOpenLoops()) await resolveLoops(chatId).catch(() => false);
@@ -105,7 +113,17 @@ export function registerIpc(d: RouterDeps): void {
   const handlers: Api = {
     bootstrap,
     retryDb: async () => { await d.boot(); return bootstrap(); },
-    saveDbUrl: async url => { setDatabaseUrl(url.trim()); await d.boot(); return bootstrap(); },
+    dbInfo,
+    setDbTools: async on => {
+      if (externalDatabaseUrl()) throw new Error('This copy uses the database from WA_TURBO_DATABASE_URL.');
+      if (on && !pgServer.tools(dbPassword()) && !(await portFree(PG_PORT, TOOLS_HOST)))
+        throw new Error(`Port ${PG_PORT} is already used by another program on this Mac, so database tools can't connect.`);
+      setDbTools(on);
+      const st = await d.boot();
+      if (!st.ok) throw new Error(st.error ?? "WA Turbo's database didn't restart.");
+      return dbInfo();
+    },
+    showDbFolder: async () => { if (!externalDatabaseUrl()) await shell.openPath(pgHome()); },
 
     listChats: acct => Q.listChats(acct),
     listAllChats: () => Q.listChats(null),

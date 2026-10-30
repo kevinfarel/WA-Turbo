@@ -230,6 +230,18 @@ export interface RunProgress {
   steps: RunStep[];
 }
 
+/** The database WA Turbo is using: the built-in Postgres, or (dev only) one named by WA_TURBO_DATABASE_URL. */
+export interface DbInfo {
+  mode: 'bundled' | 'external';
+  version: string | null;
+  folder: string | null;
+  sizeBytes: number | null;
+  /** Switched on in Settings: DBeaver and similar tools may connect over 127.0.0.1. */
+  toolsOn: boolean;
+  tools: { host: string; port: number; database: string; user: string; password: string } | null;
+  toolsError: string | null;
+}
+
 export interface Bootstrap {
   dbOk: boolean;
   dbError: string | null;

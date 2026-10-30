@@ -13,9 +13,11 @@ export function db(): pg.Pool {
   return pool;
 }
 
-export async function connect(url: string): Promise<void> {
+/** A connection string (dev Postgres) or the built-in server's socket config. */
+export async function connect(target: string | pg.PoolConfig): Promise<void> {
   await disconnect();
-  const p = new pg.Pool({ connectionString: url, max: 6, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 4_000 });
+  const where = typeof target === 'string' ? { connectionString: target } : target;
+  const p = new pg.Pool({ ...where, max: 6, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 4_000 });
   p.on('error', () => { /* a dropped idle client; the next query reconnects */ });
   await p.query('select 1');
   pool = p;

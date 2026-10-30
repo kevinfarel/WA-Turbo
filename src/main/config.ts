@@ -1,16 +1,17 @@
 import { app, safeStorage } from 'electron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 
-// ~/Library/Application Support/WA Turbo/config.json holds the database URL and the
-// Anthropic key. The key is encrypted with safeStorage (macOS Keychain) and never stored in Postgres.
+// ~/Library/Application Support/WA Turbo/config.json (mode 600) holds the Anthropic key, encrypted with
+// safeStorage (macOS Keychain) and never stored in Postgres, plus the password database tools use to reach the
+// built-in Postgres over 127.0.0.1 when that is switched on. The app itself connects over a private socket.
 
 interface ConfigFile {
-  databaseUrl?: string;
   apiKeyEnc?: string;
+  dbPassword?: string;
+  dbTools?: boolean;
 }
-
-export const DEFAULT_DATABASE_URL = 'postgres://wa_turbo@localhost:5432/wa_turbo';
 
 export const dataDir = (): string => app.getPath('userData');
 export const mediaDir = (): string => join(dataDir(), 'media');
@@ -25,16 +26,27 @@ function read(): ConfigFile {
 }
 
 function write(c: ConfigFile): void {
+  // Older versions stored an external Postgres URL (with its password) here; the built-in database replaced it.
+  const { databaseUrl: _legacy, ...keep } = c as ConfigFile & { databaseUrl?: string };
   mkdirSync(dataDir(), { recursive: true });
-  writeFileSync(configPath(), JSON.stringify(c, null, 2), { mode: 0o600 });
+  writeFileSync(configPath(), JSON.stringify(keep, null, 2), { mode: 0o600 });
 }
 
-export function databaseUrl(): string {
-  return process.env.WA_TURBO_DATABASE_URL || read().databaseUrl || DEFAULT_DATABASE_URL;
+/** Set only for dev, tests and screenshots: use that Postgres instead of the built-in one. */
+export const externalDatabaseUrl = (): string | null => process.env.WA_TURBO_DATABASE_URL || null;
+
+export function dbPassword(): string {
+  const c = read();
+  if (c.dbPassword) return c.dbPassword;
+  const pw = randomBytes(18).toString('base64url');
+  write({ ...c, dbPassword: pw });
+  return pw;
 }
 
-export function setDatabaseUrl(url: string): void {
-  write({ ...read(), databaseUrl: url });
+export const dbTools = (): boolean => read().dbTools === true;
+
+export function setDbTools(on: boolean): void {
+  write({ ...read(), dbTools: on });
 }
 
 export function getApiKey(): string | null {

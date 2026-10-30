@@ -1,6 +1,6 @@
 import type {
   Account, Accent, AiStatus, AutoStatus, Bootstrap, ChatSummaryRow, Loop, LoopDir, Message, PairState, Partner, PresetId,
-  Report, RunProgress, Settings, SummaryResult, SummaryWindow, TeamMember, UsageBucket,
+  DbInfo, Report, RunProgress, Settings, SummaryResult, SummaryWindow, TeamMember, UsageBucket,
 } from './types';
 
 // Every call the window can make. The main process registers one handler per key (ipc/router.ts),
@@ -9,7 +9,10 @@ import type {
 export interface Api {
   bootstrap(): Promise<Bootstrap>;
   retryDb(): Promise<Bootstrap>;
-  saveDbUrl(url: string): Promise<Bootstrap>;
+  dbInfo(): Promise<DbInfo>;
+  /** Lets DBeaver and similar tools on this Mac connect over 127.0.0.1. Restarts the database for a moment. */
+  setDbTools(on: boolean): Promise<DbInfo>;
+  showDbFolder(): Promise<void>;
 
   listChats(acct: string): Promise<ChatSummaryRow[]>;
   listAllChats(): Promise<ChatSummaryRow[]>;
@@ -99,7 +102,7 @@ export type ApiKey = keyof Api;
 export type EventKey = keyof Events;
 
 export const API_KEYS: ApiKey[] = [
-  'bootstrap', 'retryDb', 'saveDbUrl',
+  'bootstrap', 'retryDb', 'dbInfo', 'setDbTools', 'showDbFolder',
   'listChats', 'listAllChats', 'searchChats', 'getMessages', 'openChat', 'setActiveChat', 'setMuted', 'testNotification', 'openNotificationSettings', 'sendMessage', 'editMessage', 'deleteForEveryone', 'pickPhoto', 'saveMedia', 'setChatPartner',
   'listLoops', 'flagMessage', 'loopAction', 'listTeam', 'setTeam', 'removeTeam', 'usage',
   'startPairing', 'refreshPairing', 'cancelPairing', 'reconnect', 'unlink',

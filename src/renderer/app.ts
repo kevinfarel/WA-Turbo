@@ -3,7 +3,7 @@
 // The only send in this file is sendFromComposer(): what you typed, when you press Send or Enter.
 
 import type { Bridge, PickedPhoto } from '@shared/ipc';
-import type {
+import type { DbInfo,
   Account, Accent, AiProvider, AiStatus, AutoStatus, ChatInsight, ChatSummaryRow, Loop, Message, ModelId, PairState, Partner, PresetId, Report, RunProgress, Settings, SummaryResult, TeamMember, UsageBucket,
 } from '@shared/types';
 import { fmtDur, loopAge, loopPending, loopSla, SLA_LABEL, SLA_ORDER } from '@shared/sla';
@@ -106,6 +106,9 @@ const state = {
   team: [] as TeamMember[],
   usage: null as UsageBucket[] | null,
   usageUnit: 'day' as 'day' | 'week',
+  db: null as DbInfo | null,
+  dbPwShown: false,
+  dbBusy: false,
   auto: null as AutoStatus | null,
   ai: { provider: 'claude-code', connected: false, testing: false, cliFound: false, account: null } as AiStatus,
   summary: { chatId: null, running: false, progress: null, result: null, error: null } as Summary,
@@ -996,6 +999,7 @@ function renderSettings(): void {
   renderNotifySettings();
   renderTeam();
   void loadUsage();
+  void loadDb();
   const pins = state.chats.filter(c => c.pinned).length;
   $('#autoPinned').textContent = pins ? pins + ' pinned' : 'No pinned chats yet';
   renderAutoState();
@@ -1171,6 +1175,47 @@ function showUsageTip(hit: Element): void {
   const tw = tip.offsetWidth;
   tip.style.left = Math.max(0, Math.min(chart.clientWidth - tw, cx - tw / 2)) + 'px';
   $$('#usageChart .hit').forEach(h => h.classList.toggle('on', h === hit));
+}
+
+async function loadDb(): Promise<void> {
+  state.db = await api.dbInfo().catch(() => null);
+  renderDb();
+}
+
+function renderDb(): void {
+  const facts = document.getElementById('dbFacts'); if (!facts) return;
+  const d = state.db;
+  const size = d?.sizeBytes == null ? '' : ' · ' + (d.sizeBytes / 1e6).toFixed(1) + ' MB used';
+  facts.textContent = !d ? 'Not available' : d.mode === 'external'
+    ? 'Using the Postgres named by WA_TURBO_DATABASE_URL (developer copy)' + size
+    : 'Built in · PostgreSQL ' + (d.version ?? '') + size;
+  const box = $<HTMLInputElement>('#dbTools');
+  box.checked = !!d?.toolsOn;
+  box.disabled = state.dbBusy || d?.mode !== 'bundled';
+  $('#dbFolder').hidden = d?.mode !== 'bundled';
+  const acc = $('#dbAccess');
+  const t = d?.tools;
+  acc.hidden = !t && !d?.toolsError;
+  if (d?.toolsError && !t) { acc.innerHTML = '<div class="db-err">' + esc(d.toolsError) + '</div>'; return; }
+  if (!t) { acc.innerHTML = ''; return; }
+  const row = (k: string, v: string, shown = v) => '<dt>' + k + '</dt><dd><span class="mono">' + esc(shown) + '</span>' +
+    '<button type="button" class="btn btn-sm" data-dbcopy="' + esc(v) + '" data-dblabel="' + k + '">Copy</button></dd>';
+  acc.innerHTML = row('Host', t.host) + row('Port', String(t.port)) + row('Database', t.database) + row('User', t.user) +
+    row('Password', t.password, state.dbPwShown ? t.password : '•'.repeat(12)).replace('</dd>', '<button type="button" class="btn btn-sm" id="dbPw">' + (state.dbPwShown ? 'Hide' : 'Show') + '</button></dd>');
+}
+
+async function setDbTools(on: boolean): Promise<void> {
+  state.dbBusy = true; renderDb();
+  $('#dbFacts').textContent = on ? 'Opening the database to tools on this Mac…' : 'Closing the database to tools…';
+  try {
+    state.db = await api.setDbTools(on);
+    toast(on ? 'Database tools can connect' : 'Database tools switched off', 'ok');
+  } catch (e) {
+    fail(e);
+    state.db = await api.dbInfo().catch(() => state.db);
+  } finally {
+    state.dbBusy = false; renderDb();
+  }
 }
 
 function renderTeam(): void {
@@ -1528,6 +1573,9 @@ document.addEventListener('click', e => {
   const t = e.target as HTMLElement;
   if (!t.closest('#acctMenu')) closeAcctMenu();
 
+  const dc = t.closest<HTMLElement>('[data-dbcopy]');
+  if (dc) { void copyText(dc.dataset.dbcopy ?? '', dc.dataset.dblabel ?? 'Value'); return; }
+
   const mm = t.closest<HTMLElement>('[data-msgmenu]');
   if (mm) {
     const m = msgById(mm.dataset.msgmenu!); const r = mm.getBoundingClientRect();
@@ -1759,7 +1807,8 @@ document.addEventListener('click', e => {
     case 'cfGo': closeDlg($<HTMLDialogElement>('#dlgConfirm')); if (pendingConfirm) { const p = pendingConfirm; pendingConfirm = null; p(); } return;
     case 'expCopy': void copyText($('#expOut').textContent ?? '', 'Markdown'); return;
     case 'dbRetry': void bootDb(() => api.retryDb()); return;
-    case 'dbSave': { const v = $<HTMLInputElement>('#dbUrl').value.trim(); if (v) void bootDb(() => api.saveDbUrl(v)); return; }
+    case 'dbShow': case 'dbFolder': void api.showDbFolder().catch(fail); return;
+    case 'dbPw': state.dbPwShown = !state.dbPwShown; renderDb(); return;
   }
 }, false);
 
@@ -1952,6 +2001,7 @@ document.addEventListener('change', e => {
     const until = t.value === 'tomorrow' ? d.getTime() : t.value === '0' ? 0 : Date.now() + Number(t.value) * 60_000;
     void api.saveSettings({ notifyPausedUntil: until }).then(s => { state.settings = s; renderSettings(); toast(until ? 'Notifications paused' : 'Notifications resumed', 'ok'); });
   }
+  if (t.id === 'dbTools') void setDbTools(t.checked);
   if (t.id === 'autoOn') void api.saveSettings({ autoOn: t.checked }).then(s => { state.settings = s; renderSettings(); toast(s.autoOn ? 'Auto summary on' : 'Auto summary off'); });
   if (['pinEveryMin', 'pinWindow', 'otherEveryMin', 'otherWindow'].includes(t.id)) void api.saveSettings({ [t.id]: Number(t.value) } as Partial<Settings>).then(s => { state.settings = s; renderSettings(); });
   if (t.id === 'aiImages') void api.saveSettings({ aiImages: t.checked }).then(s => { state.settings = s; toast(s.aiImages ? 'Claude will see photos in summaries' : 'Summaries now use text only'); });
@@ -2082,8 +2132,11 @@ async function bootDb(call: () => Promise<Awaited<ReturnType<Bridge['bootstrap']
   if (btn) { btn.disabled = false; btn.textContent = 'Try again'; }
   $('#dbScreen').hidden = b.dbOk;
   if (!b.dbOk) {
-    $('#dbError').textContent = (b.dbError ?? 'Postgres is not reachable.') + ' WA Turbo keeps your chats in your local PostgreSQL 17.';
-    $('.db-cmd').hidden = !/answering/.test(b.dbError ?? '');
+    const [first, ...log] = (b.dbError ?? "WA Turbo's database isn't answering.").split('\n');
+    const lead = /didn't start\.?$/.test(first) ? '' : first + ' ';
+    $('#dbError').textContent = lead + 'Your chats are kept in a database built into WA Turbo, on this Mac. Try again, or send the lines below to whoever set WA Turbo up for you.';
+    $('#dbLog').textContent = log.join('\n');
+    $('#dbLog').hidden = !log.length;
     return;
   }
   await refreshAll();
