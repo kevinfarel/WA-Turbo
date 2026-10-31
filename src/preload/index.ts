@@ -25,3 +25,5 @@ api.on = (event: EventKey, cb: (p: unknown) => void) => {
 };
 
 contextBridge.exposeInMainWorld('api', api as unknown as Bridge);
+// 'darwin' or 'win32': the window adapts its chrome and wording (Dock or taskbar, this Mac or this PC).
+contextBridge.exposeInMainWorld('platform', process.platform);

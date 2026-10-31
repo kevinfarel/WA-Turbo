@@ -2,7 +2,7 @@
 
 A desktop app that links several WhatsApp numbers on one computer and uses Claude to summarize chats, write reports and track who is still waiting for a reply (SUM UP!, beta). Everything runs locally: chats are stored in a PostgreSQL database built into the app, and nothing goes to a WA Turbo server, because there isn't one.
 
-Current release: see [CHANGELOG.md](CHANGELOG.md). Runs on macOS (Apple Silicon); a Windows build is in development.
+Current release: see [CHANGELOG.md](CHANGELOG.md). Runs on macOS (Apple Silicon) and Windows 10/11 (x64).
 
 ## What it does
 
@@ -24,7 +24,7 @@ Current release: see [CHANGELOG.md](CHANGELOG.md). Runs on macOS (Apple Silicon)
 
 | | |
 |---|---|
-| Machine | macOS 13+ on Apple Silicon |
+| Machine | macOS 13+ on Apple Silicon, or Windows 10/11 x64 |
 | Node | 22.12 or newer (`.nvmrc`). With Homebrew: `PATH=/opt/homebrew/opt/node@22/bin:$PATH` |
 | Claude | Claude Code installed and signed in with a Claude plan (default), or an Anthropic API key in Settings |
 | Database | None to install: PostgreSQL 18 ships inside the app |
@@ -45,11 +45,21 @@ WA_TURBO_USER_DATA=/tmp/wat-dev npm run dev
 
 Never link the same WhatsApp number in two copies at once; the two connections knock each other off.
 
+### Building for Windows
+
+```sh
+npm run dist:win        # send guard + Windows Postgres + build + NSIS installer: dist/WA Turbo-<version>-x64-setup.exe
+```
+
+This works from a Mac (Apple Silicon included; electron-builder's NSIS 3.12 toolset has a native `makensis`). `scripts/prepare-postgres-win.mjs` downloads the pinned Windows Postgres and the Visual C++ runtime it needs, checks their hashes and trims them into `vendor/postgres-win32-x64`. Build from a real `node_modules` (`npm ci`), never a symlinked one: electron-builder would silently leave dependencies out. The installer is unsigned, so SmartScreen asks once (More info → Run anyway).
+
+On a Windows machine, `npm ci` currently stops at the Mac-only `@embedded-postgres/darwin-arm64` dev dependency; use `npm ci --force` there.
+
 ### Environment variables
 
 | Variable | Effect |
 |---|---|
-| `WA_TURBO_USER_DATA` | Use this folder instead of `~/Library/Application Support/WA Turbo` (config, media, built-in database) |
+| `WA_TURBO_USER_DATA` | Use this folder instead of `~/Library/Application Support/WA Turbo` or `%APPDATA%\WA Turbo` (config, media, built-in database) |
 | `WA_TURBO_DATABASE_URL` | Use this Postgres instead of the built-in one (development and tests only) |
 | `WA_TURBO_OFFLINE=1` | Open stored data without connecting to WhatsApp (screenshots, demos) |
 | `WA_TURBO_NO_AUTO=1` | Turn off automatic summaries |
@@ -66,6 +76,8 @@ Never link the same WhatsApp number in two copies at once; the two connections k
 | `npm run postgres` | Prepare the bundled Postgres in `vendor/postgres` |
 | `npm run build` | Build main, preload and renderer into `out/` |
 | `npm run dist` | Send guard + Postgres + build + `.dmg` in `dist/` |
+| `npm run postgres:win` | Prepare the Windows Postgres in `vendor/postgres-win32-x64` |
+| `npm run dist:win` | Send guard + Windows Postgres + build + Windows installer in `dist/` |
 | `npm run release:patch` / `release:minor` / `release:major` | Bump the version, commit and tag (see [Releasing](#releasing)) |
 
 ## Project layout
@@ -80,7 +92,7 @@ src/main/          Electron main process
   notify/          Notifications, badge, menu bar icon (never on the send path)
   ipc/router.ts    Every call the window can make
 src/preload/       window.api bridge (context isolation on, sandboxed)
-src/renderer/      The window: index.html, app.ts, styles/
+src/renderer/      The window: index.html, app.ts, styles/, i18n (Bahasa Indonesia), platform.ts (Windows wording)
 src/shared/        Types and helpers used by both sides
 migrations/        NNN_name.sql, applied in order on start, each once
 scripts/           Send guard, Postgres preparation
@@ -91,7 +103,9 @@ build/             App icon
 
 ## Database
 
-- Built-in PostgreSQL 18, started and stopped by the app. Data lives in `<userData>/postgres/data`. The app connects over a private Unix socket; nothing listens on the network unless "Let database tools connect" is switched on in Settings → Database (then 127.0.0.1 only, with a password).
+- Built-in PostgreSQL 18, started and stopped by the app.
+  - **macOS:** data in `<userData>/postgres/data`. The app connects over a private Unix socket; nothing listens on the network unless "Let database tools connect" is switched on in Settings → Database (then 127.0.0.1 only, with a password). Code: `src/main/db/server.ts`.
+  - **Windows:** data in `%LOCALAPPDATA%\WA Turbo\postgres` (not the roaming profile). Windows apps can't use the Unix socket, so the server always listens on 127.0.0.1 only, with a password for every login, and is stopped cleanly through `pg_ctl`. Code: `src/main/db/server-win.ts`.
 - Schema changes go in a new `migrations/NNN_name.sql`; never edit one that has shipped. Keep SQL compatible with PostgreSQL 12 (no `gen_random_uuid()`, no extensions) so a development database on an older server still works.
 
 ## Branches

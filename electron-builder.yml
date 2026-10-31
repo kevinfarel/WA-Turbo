@@ -9,9 +9,11 @@ files:
 extraResources:
   - from: migrations
     to: migrations
-  - from: vendor/postgres      # built by scripts/prepare-postgres.mjs
-    to: postgres
+# Each platform ships its own Postgres build into resources/postgres.
 mac:
+  extraResources:
+    - from: vendor/postgres      # built by scripts/prepare-postgres.mjs
+      to: postgres
   target:
     - target: dmg
       arch: [arm64]
@@ -23,3 +25,19 @@ mac:
     LSMinimumSystemVersion: "13.0"
 dmg:
   title: WA Turbo
+toolsets:
+  nsis: "1.2.1"   # NSIS 3.12 bundle: has a native Apple Silicon makensis, so the installer builds on this Mac
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.png
+  extraResources:
+    - from: vendor/postgres-win32-x64   # built by scripts/prepare-postgres-win.mjs
+      to: postgres
+nsis:
+  oneClick: true           # per-user install, no admin prompt (the bundled Postgres refuses to run elevated)
+  perMachine: false
+  deleteAppDataOnUninstall: false   # chats and the database stay unless removed by hand
+  artifactName: ${productName}-${version}-x64-setup.${ext}
+  shortcutName: WA Turbo
