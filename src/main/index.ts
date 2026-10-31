@@ -1,4 +1,4 @@
-import { app, BrowserWindow, nativeTheme, net, protocol, shell } from 'electron';
+import { app, BrowserWindow, net, protocol, shell } from 'electron';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -10,8 +10,10 @@ import { resolveLoops } from './loops/service';
 import { initMedia, loadMedia, MediaError } from './media';
 import { aiStatus, broadcast, registerIpc } from './ipc/router';
 import { autoSummary } from './ai/auto';
+import { langDetect } from './ai/language';
 import { notifier } from './notify/center';
 import { WaManager } from './wa/manager';
+import { restoreTheme, windowBackground } from './ui';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -67,6 +69,7 @@ manager.on('ingested', (accountId, r) => {
   for (const chatId of r.changed) broadcast('messages-changed', { chatId });
   if (r.loopsChanged) void listLoops().then(l => broadcast('loops-changed', l)).catch(() => {});
   autoSummary.markChanged(r.chats);
+  langDetect.poke();
   void notifier.onIngested(r).catch(() => {});
 });
 
@@ -97,7 +100,7 @@ function createWindow(): void {
     title: 'WA Turbo',
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 16 },
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1b1d21' : '#eceef1',
+    backgroundColor: windowBackground(),
     show: false,
     webPreferences: { preload: join(here, '../preload/index.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false },
   });
@@ -115,6 +118,7 @@ function createWindow(): void {
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
 
 app.whenReady().then(async () => {
+  restoreTheme();
   let firstBoot: Promise<unknown> = Promise.resolve();
   registerIpc({ manager, boot, dbState: () => dbState, ready: () => firstBoot });
   registerMediaProtocol();
@@ -134,6 +138,13 @@ app.whenReady().then(async () => {
       })().catch(() => {}),
       onStatus: s => broadcast('auto', s),
     }).catch(() => {});
+  }
+  // WA_TURBO_NO_LANG=1 keeps the one-time language detection off as well.
+  if (dbState.ok && !process.env.WA_TURBO_NO_LANG) {
+    langDetect.start({
+      isConnected: async () => (await aiStatus((await getSettings()).provider)).connected,
+      onDetected: () => void listAccounts().then(a => broadcast('accounts', a)).catch(() => {}),
+    });
   }
   if (dbState.ok) {
     await notifier.start({
@@ -168,7 +179,7 @@ app.on('before-quit', e => {
   if (quitting) return;
   quitting = true;
   e.preventDefault();
-  autoSummary.stop(); notifier.stop(); manager.stopAll();
+  autoSummary.stop(); langDetect.stop(); notifier.stop(); manager.stopAll();
   void disconnect()
     .then(() => (externalDatabaseUrl() ? undefined : pgServer.stop()))
     .catch(err => console.error('Database shutdown:', err))

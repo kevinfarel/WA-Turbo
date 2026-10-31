@@ -2,6 +2,11 @@
 
 export type AccountStatus = 'pairing' | 'online' | 'reconnecting' | 'logged_out';
 export type Accent = 'green' | 'blue' | 'amber' | 'violet' | 'cyan';
+/** The languages WA Turbo speaks: the app itself, and what Claude writes for a number. */
+export type Lang = 'en' | 'id';
+export type ThemeMode = 'light' | 'dark' | 'system';
+/** What the window tells the main process about how it looks: language, light/dark, and the colours of the theme in use. */
+export interface UiPrefs { lang: Lang; mode: ThemeMode; dark: boolean; bg: string; titlebar: string; titlebarText: string }
 
 export interface Account {
   id: string;
@@ -11,6 +16,10 @@ export interface Account {
   accent: Accent;
   status: AccountStatus;
   pairedAt: number | null;
+  /** What Claude writes in for this number; null until picked or detected from its chats. */
+  lang: Lang | null;
+  /** True when lang was detected from the chats rather than picked. */
+  langDetected: boolean;
 }
 
 export type ChatKind = 'dm' | 'group';
@@ -133,7 +142,22 @@ export interface Settings {
   menuBar: boolean;
   /** All banners paused until this time (epoch ms, 0 = not paused). */
   notifyPausedUntil: number;
+  /** Calling code for local numbers in imported contacts ("0812…" → +62 812…). Empty = guess from the linked number. */
+  contactsCountry: string;
 }
+
+/** Where a name in the contacts import came from: the file, an earlier import, or the phone that owns the number (via WhatsApp). */
+export type ContactSource = 'file' | 'import' | 'phone';
+export interface ContactOption { name: string; from: ContactSource[] }
+/** A number with more than one contact name; the person picks which one WA Turbo keeps. */
+export interface ContactDuplicate { phone: string; display: string; chat: string | null; options: ContactOption[]; keep: string }
+export interface ContactImportPreview {
+  token: string; fileName: string; countryCode: string;
+  cards: number; numbers: number; added: number; unchanged: number; skipped: number;
+  duplicates: ContactDuplicate[];
+}
+export interface ContactImportResult { saved: number; kept: number; renamedChats: number }
+export interface ContactsInfo { count: number; updatedAt: number | null; countryCode: string }
 
 /** Claude tokens for one hour and one number (acct null = report overviews across numbers). */
 export interface UsageBucket { hour: number; acct: string | null; input: number; output: number; cacheRead: number; cacheWrite: number; runs: number }
@@ -186,6 +210,8 @@ export interface SummaryResult {
   /** 'week:2026-10-26', 'n:50', 'auto:10' or 'days:7': what was read. */
   windowKey: string | null;
   auto: boolean;
+  /** The language the summary is written in. */
+  lang?: Lang;
   /** Older messages this week left out by the 300-message cap. */
   skipped?: number;
   /** True when nothing changed and the saved summary was returned without calling Claude. */

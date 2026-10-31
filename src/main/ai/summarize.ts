@@ -1,14 +1,14 @@
-import type { ChatInsight, Loop, Message, ModelId, RunProgress, SummaryResult, SummaryWindow } from '@shared/types';
+import type { ChatInsight, Lang, Loop, Message, ModelId, RunProgress, SummaryResult, SummaryWindow } from '@shared/types';
 import { EMPTY_WEEK } from '@shared/presets';
 import { weekStart, ymd } from '@shared/week';
 import {
-  addAliases, cachedSummary, chatMeta, chatRev, createLoop, getSettings, messagesSinceCapped, getMessages, lastMessageId, listAliases, loopsForChat, reviewLoop, saveSummary, setLoopState, setSummarized,
+  addAliases, cachedSummary, chatMeta, chatRev, createLoop, getSettings, messagesSinceCapped, getMessages, langOfChat, lastMessageId, listAliases, loopsForChat, reviewLoop, saveSummary, setLoopState, setSummarized,
 } from '../db/queries';
 import { MODEL_NAMES, structured, type AiImage } from './client';
 import { imageForAi } from '../media';
 import { resolveLoops } from '../loops/service';
 import { openLoopsBlock, stamp, transcript } from './context';
-import { CHAT_SYSTEM } from './prompts';
+import { chatSystem } from './prompts';
 import { AliasBook, restore } from './redact';
 import { ChatInsightOut } from './schemas';
 
@@ -38,12 +38,14 @@ export interface ChatRun {
   insight: ChatInsight;
   msgCount: number;
   lastMsgId: number | null;
+  lang: Lang;
 }
 
-/** Reads one chat window, asks Claude for the brief, and merges what it found into the loops table. */
+/** Reads one chat window, asks Claude for the brief in the chat's number's language, and merges what it found into the loops table. */
 export async function analyzeChat(chatId: string, messages: Message[], model: ModelId, signal: AbortSignal | undefined, onRedacted?: () => void, onSent?: () => void, kind = 'summary'): Promise<ChatRun> {
   const chat = await chatMeta(chatId);
   if (!chat) throw new Error('That chat no longer exists.');
+  const lang = await langOfChat(chatId);
   const book = new AliasBook(await listAliases());
   // Claude reviews only loops whose message it can see; a short window can't judge older ones.
   const inWindow = new Set(messages.map(m => m.id));
@@ -56,7 +58,7 @@ export async function analyzeChat(chatId: string, messages: Message[], model: Mo
 
   const user = `Now: ${stamp(Date.now())}\n\n${loopText}\n\n${text}`;
   onSent?.();
-  const out = await structured({ kind, model, system: CHAT_SYSTEM, user, images, schema: ChatInsightOut, effort: 'medium', signal, chatId });
+  const out = await structured({ kind, model, system: chatSystem(lang), user, images, schema: ChatInsightOut, effort: 'medium', signal, chatId });
 
   const display = book.displayMap();
   // Citations live in the cite fields; [#id] markers in prose would show up as raw text.
@@ -74,7 +76,7 @@ export async function analyzeChat(chatId: string, messages: Message[], model: Mo
   };
 
   await mergeLoops(chatId, chat.partner_id, loops, out, messages, valid, r);
-  return { insight, msgCount: messages.length, lastMsgId: await lastMessageId(chatId) };
+  return { insight, msgCount: messages.length, lastMsgId: await lastMessageId(chatId), lang };
 }
 
 async function mergeLoops(
@@ -135,7 +137,7 @@ export async function summarizeChat(chatId: string, model: ModelId, opts: Summar
   const rev = await chatRev(chatId);
   const win = await readWindow(chatId, opts.window);
   if (!opts.force) {
-    const hit = await cachedSummary(chatId, model, win.key, rev);
+    const hit = await cachedSummary(chatId, model, win.key, rev, await langOfChat(chatId));
     if (hit) return { ...hit, cached: true };
   }
   const { messages } = win;
@@ -146,7 +148,7 @@ export async function summarizeChat(chatId: string, model: ModelId, opts: Summar
   s.next();
   const run = await analyzeChat(chatId, messages, model, signal, () => s.next(), () => { s.next(); s.next(); }, opts.auto ? 'auto' : 'summary');
   s.next();
-  const result: SummaryResult = { chatId, model, createdAt: Date.now(), msgCount: run.msgCount, insight: run.insight, windowKey: win.key, auto: !!opts.auto, skipped: win.skipped };
+  const result: SummaryResult = { chatId, model, createdAt: Date.now(), msgCount: run.msgCount, insight: run.insight, windowKey: win.key, auto: !!opts.auto, skipped: win.skipped, lang: run.lang };
   if (opts.save !== false) {
     await saveSummary(result, win.size, run.lastMsgId, rev);
     if (!opts.auto) await setSummarized([chatId]);

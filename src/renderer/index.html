@@ -7,6 +7,7 @@
 <title>WA Turbo</title>
 <link rel="stylesheet" href="./styles/app.css">
 <link rel="stylesheet" href="./styles/app-extra.css">
+<link rel="stylesheet" href="./styles/themes.css">
 </head>
 <body>
 
@@ -36,7 +37,7 @@
         <span class="lbl">Reports</span>
       </button>
       <button type="button" role="tab" id="tab-settings" aria-selected="false" aria-controls="view-settings" data-view="settings">
-        <svg class="od-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.4M12 18.8v2.4M4.8 12H2.4M21.6 12h-2.4M6.9 6.9 5.2 5.2M18.8 18.8l-1.7-1.7M17.1 6.9l1.7-1.7M5.2 18.8l1.7-1.7"/></svg>
+        <svg class="od-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
         <span class="lbl">Settings</span>
       </button>
     </div>
@@ -46,6 +47,10 @@
         <span class="dot" aria-hidden="true"></span><span id="aiChipLabel">Claude not connected</span>
       </button>
       <span id="aiChipHint" class="vh">Opens Settings</span>
+      <button type="button" class="icon-btn theme-btn" id="themeToggle" aria-label="Switch between light and dark mode" title="Switch between light and dark mode">
+        <svg class="od-icon sun" style="--od-icon-size:17px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+        <svg class="od-icon moon" style="--od-icon-size:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a6.8 6.8 0 0 0 10.7 10.7z"/></svg>
+      </button>
       <button type="button" class="icon-btn" id="panelToggle" aria-pressed="true" aria-label="Toggle AI panel" title="Toggle AI panel">
         <svg class="od-icon" style="--od-icon-size:17px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg>
       </button>
@@ -63,7 +68,7 @@
           <svg class="od-icon" style="--od-icon-size:19px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         </button>
         <button type="button" class="rail-act solid" id="railSettings" aria-label="Open Settings" title="Settings">
-          <svg class="od-icon" style="--od-icon-size:18px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.4M12 18.8v2.4M4.8 12H2.4M21.6 12h-2.4M6.9 6.9 5.2 5.2M18.8 18.8l-1.7-1.7M17.1 6.9l1.7-1.7M5.2 18.8l1.7-1.7"/></svg>
+          <svg class="od-icon" style="--od-icon-size:18px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
         </button>
       </div>
     </nav>
@@ -174,6 +179,41 @@
           <h1>Settings</h1>
           <p>Claude, auto summary and notifications. WA Turbo reads your chats locally and sends only the selected messages to the model you connect here.</p>
         </header>
+
+        <div class="fs" id="appearanceBlock">
+          <h2>Appearance and language</h2>
+          <label class="f">
+            <span class="lb">App language</span>
+            <select id="appLang">
+              <option value="en">English</option>
+              <option value="id">Bahasa Indonesia</option>
+            </select>
+            <span class="hp">Menus, buttons and messages in WA Turbo. Your chats are never translated. Changing it redraws the window.</span>
+          </label>
+          <div class="f">
+            <span class="lb">Mode</span>
+            <div class="mode-seg" role="group" aria-label="Light or dark">
+              <button type="button" data-mode="light" aria-pressed="false">Light</button>
+              <button type="button" data-mode="dark" aria-pressed="false">Dark</button>
+              <button type="button" data-mode="system" aria-pressed="false">Same as macOS</button>
+            </div>
+            <span class="hp">The sun and moon button in the title bar switches between your light and dark theme.</span>
+          </div>
+          <div class="f">
+            <span class="lb">Light theme</span>
+            <div class="theme-grid" id="lightThemes"></div>
+          </div>
+          <div class="f">
+            <span class="lb">Dark theme</span>
+            <div class="theme-grid" id="darkThemes"></div>
+          </div>
+        </div>
+
+        <div class="fs" id="langBlock">
+          <h2>Summary language</h2>
+          <p class="hint">The language Claude writes in for each linked number: summaries, SUM UP! cards and report overviews. When a number is linked, WA Turbo reads its first 10 conversations once Claude is connected and picks English or Bahasa Indonesia; change it here any time. Summaries already written keep their language until you summarize again.</p>
+          <ul class="lang-list" id="langList"></ul>
+        </div>
 
         <div class="fs">
           <h2>Claude connection</h2>
@@ -324,6 +364,25 @@
             <button type="button" class="btn btn-sm" id="openNotifySettings">Open macOS notification settings</button>
           </div>
           <p class="hint" style="margin-top:-8px">The first banner asks macOS for permission. If nothing appears, allow WA Turbo in macOS notification settings. Whether banners slide away or stay until closed is set there too, for the whole app.</p>
+        </div>
+
+        <div class="fs" id="contactsBlock">
+          <h2>Contacts</h2>
+          <p class="hint">Import your phone's contacts as a .vcf file, and chats and group members show the names you saved, as they do on your phone. If a number has more than one name, WA Turbo asks which one to keep. Contacts stay on this Mac.</p>
+          <div class="vcf-drop" id="vcfDrop">
+            <span><b>Drop a .vcf file here</b> or</span>
+            <button type="button" class="btn btn-sm" id="vcfPick">Choose file…</button>
+            <input type="file" id="vcfFile" accept=".vcf,text/vcard,text/x-vcard" hidden>
+          </div>
+          <p class="db-facts" id="contactsFacts">No contacts imported yet.</p>
+          <details class="vcf-how">
+            <summary>How to export contacts from your phone</summary>
+            <div class="vcf-how-grid">
+              <div><b>iPhone</b><ol><li>Open Contacts and tap <b>Lists</b> at the top left.</li><li>Touch and hold <b>All Contacts</b> (or All iCloud), then tap <b>Export</b>.</li><li>AirDrop the file to this Mac.</li></ol><p>Or on icloud.com/contacts: select all, then Export vCard.</p></div>
+              <div><b>Android</b><ol><li>Open Contacts → <b>Fix &amp; manage</b> → <b>Export to file</b>. On Samsung: Contacts → Manage contacts → Export.</li><li>Send the .vcf to this Mac by Google Drive, email or USB.</li></ol><p>Or on contacts.google.com: Export, then vCard.</p></div>
+            </div>
+          </details>
+          <div class="od-row" style="--od-gap:8px"><button type="button" class="btn btn-sm" id="contactsClear" hidden>Remove imported names</button></div>
         </div>
 
         <div class="fs" id="teamBlock">
@@ -531,6 +590,33 @@
       <span class="od-fill"></span>
       <button type="button" class="btn" data-close>Keep it</button>
       <button type="button" class="btn btn-danger" id="cfGo">Delete</button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- ===== contacts import (.vcf) ===== -->
+<dialog id="dlgContacts" aria-labelledby="ctTitle">
+  <form class="sheet" method="dialog" style="max-width:640px">
+    <header>
+      <div class="od-fill"><h2 id="ctTitle">Import contacts</h2><p id="ctSub"></p></div>
+      <button type="button" class="icon-btn" data-close aria-label="Close"><svg class="od-icon" style="--od-icon-size:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    </header>
+    <div class="bd">
+      <p class="ct-summary" id="ctSummary"></p>
+      <label class="ct-cc">Numbers saved without a country code, like 0812…, are in <span class="ct-plus">+</span><input type="text" id="ctCountry" inputmode="numeric" maxlength="3" autocomplete="off"></label>
+      <div class="ct-dupwrap" id="ctDupWrap" hidden>
+        <div class="ct-duphead">
+          <div class="od-fill"><b id="ctDupTitle"></b><span class="kv">Pick the name WA Turbo should show for each number.</span></div>
+          <button type="button" class="btn btn-sm" id="ctUseFile">Use names from the file</button>
+          <button type="button" class="btn btn-sm" id="ctKeepCurrent">Keep current names</button>
+        </div>
+        <ul class="ct-dups" id="ctDups"></ul>
+      </div>
+    </div>
+    <footer>
+      <span class="od-fill"></span>
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button type="button" class="btn btn-primary" id="ctGo">Import</button>
     </footer>
   </form>
 </dialog>

@@ -2,6 +2,7 @@ import { app, safeStorage } from 'electron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
+import type { UiPrefs } from '@shared/types';
 
 // ~/Library/Application Support/WA Turbo/config.json (mode 600) holds the Anthropic key, encrypted with
 // safeStorage (macOS Keychain) and never stored in Postgres, plus the password database tools use to reach the
@@ -11,6 +12,8 @@ interface ConfigFile {
   apiKeyEnc?: string;
   dbPassword?: string;
   dbTools?: boolean;
+  /** App language and theme as the window last set them, so the next launch opens in the right colours. */
+  ui?: UiPrefs;
 }
 
 export const dataDir = (): string => app.getPath('userData');
@@ -47,6 +50,12 @@ export const dbTools = (): boolean => read().dbTools === true;
 
 export function setDbTools(on: boolean): void {
   write({ ...read(), dbTools: on });
+}
+
+export const uiPrefs = (): UiPrefs | null => read().ui ?? null;
+
+export function setUiPrefs(ui: UiPrefs): void {
+  write({ ...read(), ui });
 }
 
 export function getApiKey(): string | null {

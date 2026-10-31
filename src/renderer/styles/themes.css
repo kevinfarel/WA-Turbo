@@ -1,0 +1,119 @@
+/* Themes. app.css holds the WA Turbo Light tokens on :root; each theme below redefines them on
+   <html data-theme="…">. theme.ts picks the light or dark theme from Settings and the titlebar switch. */
+
+/* ---------- light ---------- */
+:root[data-theme="whatsapp-light"]{
+  --s0:#ffffff; --s1:#f0f2f5; --s2:#e9edef; --s3:#dfe5e7;
+  --chrome:#f0f2f5; --chrome-2:#e9edef; --seg:#e2e7ea; --seg-hover:rgba(255,255,255,.7);
+  --line:#d1d7db; --line-soft:#e9edef; --line-strong:#b8c1c6;
+  --ink:#111b21; --ink-2:#3b4a54; --ink-3:#54656f; --ink-4:#667781;
+  --brand:#008069; --brand-ink:#ffffff; --brand-hover:#017561; --brand-soft:#e7f8f3; --brand-line:#a3dccd;
+  --brand-text:#00654f; --brand-text-2:#004a3a; --brand-off:#9ccfc3; --on-brand:#ffffff;
+  --a-green:#008069; --a-blue:#027eb5; --a-amber:#b07500; --a-violet:#6f55e0; --a-cyan:#0085c2;
+  --chat-bg:#efeae2; --bubble-in:#ffffff; --bubble-in-line:#ffffff; --bubble-out:#d9fdd3; --bubble-out-line:#d9fdd3;
+  --toast:#1f2c33;
+}
+
+/* ---------- dark: shared status colours ---------- */
+:root[data-theme="turbo-dark"], :root[data-theme="dark-modern"], :root[data-theme="dark-plus"], :root[data-theme="monokai"], :root[data-theme="whatsapp-dark"]{
+  color-scheme:dark;
+  --warn:#d29922; --warn-soft:#3a2e12; --warn-line:#6b5420; --warn-text:#e8bd5a;
+  --danger:#f0605a; --danger-soft:#3d1d1e; --danger-line:#7a3033; --danger-text:#ff9b95;
+  --ok:#3fb950; --ok-soft:#15301f; --ok-line:#2e5e3c; --ok-text:#7ee08f;
+  --info:#58a6ff; --info-soft:#152a45; --info-line:#2b4f7e; --info-text:#9cc9ff;
+  --a-green:#2a9d6e; --a-blue:#3d74c4; --a-amber:#b07a1e; --a-violet:#8160c4; --a-cyan:#1f8a9c;
+  --backdrop:rgba(0,0,0,.62); --toast:#3a3f47; --code-bg:rgba(255,255,255,.09);
+  --seg-hover:rgba(255,255,255,.07);
+  --shadow-1:0 1px 2px rgba(0,0,0,.35);
+  --shadow-2:0 4px 14px rgba(0,0,0,.45);
+  --shadow-3:0 18px 48px rgba(0,0,0,.6);
+}
+
+:root[data-theme="turbo-dark"]{
+  --s0:#1f2227; --s1:#1a1c20; --s2:#272b31; --s3:#30353c;
+  --chrome:#17191c; --chrome-2:#141619; --seg:#24272c;
+  --line:#353a42; --line-soft:#2b2f36; --line-strong:#4a515b;
+  --ink:#e8ebef; --ink-2:#c6ccd4; --ink-3:#9ba4af; --ink-4:#7f8894;
+  --brand:#14896a; --brand-ink:#ffffff; --brand-hover:#17a07c; --brand-soft:#173a31; --brand-line:#2a6152;
+  --brand-text:#6fd6b0; --brand-text-2:#9ae6c9; --brand-off:#2f5148; --on-brand:#ffffff;
+  --chat-bg:#16181b; --bubble-in:#23272d; --bubble-in-line:#2d3239; --bubble-out:#173a31; --bubble-out-line:#24594a;
+}
+
+/* VS Code "Dark Modern" palette */
+:root[data-theme="dark-modern"]{
+  --s0:#1f1f1f; --s1:#181818; --s2:#2b2b2b; --s3:#313131;
+  --chrome:#181818; --chrome-2:#181818; --seg:#2b2b2b;
+  --line:#2b2b2b; --line-soft:#262626; --line-strong:#3c3c3c;
+  --ink:#e4e4e4; --ink-2:#cccccc; --ink-3:#9d9d9d; --ink-4:#868686;
+  --brand:#0078d4; --brand-ink:#ffffff; --brand-hover:#026ec1; --brand-soft:#0f2d47; --brand-line:#1d4f7c;
+  --brand-text:#4daafc; --brand-text-2:#7cc0ff; --brand-off:#24425c; --on-brand:#ffffff;
+  --chat-bg:#181818; --bubble-in:#252526; --bubble-in-line:#2b2b2b; --bubble-out:#0f2d47; --bubble-out-line:#1d4f7c;
+}
+
+/* VS Code "Dark+" palette */
+:root[data-theme="dark-plus"]{
+  --s0:#1e1e1e; --s1:#252526; --s2:#2d2d2d; --s3:#37373d;
+  --chrome:#3c3c3c; --chrome-2:#333333; --seg:#2d2d2d;
+  --line:#3c3c3c; --line-soft:#303031; --line-strong:#4b4b4b;
+  --ink:#e0e0e0; --ink-2:#d4d4d4; --ink-3:#a6a6a6; --ink-4:#8b8b8b;
+  --brand:#0e639c; --brand-ink:#ffffff; --brand-hover:#1177bb; --brand-soft:#04395e; --brand-line:#264f78;
+  --brand-text:#3794ff; --brand-text-2:#75beff; --brand-off:#2a4a63; --on-brand:#ffffff;
+  --chat-bg:#1e1e1e; --bubble-in:#2d2d2d; --bubble-in-line:#3c3c3c; --bubble-out:#04395e; --bubble-out-line:#264f78;
+}
+
+/* Monokai palette */
+:root[data-theme="monokai"]{
+  --s0:#272822; --s1:#1e1f1c; --s2:#34352f; --s3:#3e3d32;
+  --chrome:#1e1f1c; --chrome-2:#1a1b18; --seg:#2d2e28;
+  --line:#414339; --line-soft:#34352f; --line-strong:#5b5d4f;
+  --ink:#f8f8f2; --ink-2:#e2e2d8; --ink-3:#a8a89a; --ink-4:#8d8c7d;
+  --brand:#a6e22e; --brand-ink:#272822; --brand-hover:#b8f046; --brand-soft:#33401c; --brand-line:#5b7326;
+  --brand-text:#a6e22e; --brand-text-2:#c4f26a; --brand-off:#4a5631; --on-brand:#272822;
+  --warn:#fd971f; --warn-text:#ffb35c; --danger:#f92672; --danger-text:#ff6c9f; --ok:#a6e22e; --ok-text:#c4f26a; --info:#66d9ef; --info-text:#8fe6f5;
+  --a-green:#6a8f1e; --a-blue:#2b8aa0; --a-amber:#b86d12; --a-violet:#7e5bd6; --a-cyan:#1f8f99;
+  --chat-bg:#1e1f1c; --bubble-in:#2d2e27; --bubble-in-line:#3e3d32; --bubble-out:#33401c; --bubble-out-line:#4c5f22;
+}
+
+/* WhatsApp dark */
+:root[data-theme="whatsapp-dark"]{
+  --s0:#111b21; --s1:#0c1317; --s2:#202c33; --s3:#2a3942;
+  --chrome:#202c33; --chrome-2:#1b252b; --seg:#2a3942;
+  --line:#2a3942; --line-soft:#222d34; --line-strong:#3b4a54;
+  --ink:#e9edef; --ink-2:#d1d7db; --ink-3:#aebac1; --ink-4:#8696a0;
+  --brand:#00a884; --brand-ink:#111b21; --brand-hover:#06cf9c; --brand-soft:#0b3b33; --brand-line:#13594c;
+  --brand-text:#00d4a4; --brand-text-2:#5fe8c6; --brand-off:#1d4a41; --on-brand:#111b21;
+  --a-green:#00a884; --a-blue:#027eb5; --a-amber:#c88b00; --a-violet:#7f66ff; --a-cyan:#0097c4;
+  --chat-bg:#0b141a; --bubble-in:#202c33; --bubble-in-line:#202c33; --bubble-out:#005c4b; --bubble-out-line:#005c4b;
+}
+
+/* Until the theme and language are applied, keep the window blank (the native background shows). */
+html:not([data-ready]) .app{visibility:hidden;animation:wat-reveal 0s 1.5s forwards}
+@keyframes wat-reveal{to{visibility:visible}}
+
+/* titlebar light/dark switch */
+.theme-btn .moon{display:none}
+:root[data-dark="true"] .theme-btn .sun{display:none}
+:root[data-dark="true"] .theme-btn .moon{display:inline-block}
+
+/* Settings → Appearance */
+.theme-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px}
+.theme-card{display:grid;gap:7px;padding:8px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--s0);cursor:pointer;text-align:left;color:var(--ink-2);font-size:12px;font-weight:600}
+.theme-card:hover{border-color:var(--line-strong)}
+.theme-card[aria-pressed="true"]{border-color:var(--brand);box-shadow:0 0 0 1px var(--brand)}
+.theme-card .sw{display:grid;grid-template-columns:22% 1fr;height:52px;border-radius:6px;overflow:hidden;border:1px solid rgba(127,127,127,.25)}
+.theme-card .sw i{display:block}
+.theme-card .sw .main{display:grid;align-content:center;gap:5px;padding:0 8px}
+.theme-card .sw b{display:block;height:8px;border-radius:4px;width:62%}
+.theme-card .sw b + b{justify-self:end;width:48%}
+.mode-seg{display:inline-flex;gap:2px;padding:2px;background:var(--seg);border-radius:var(--r)}
+.mode-seg button{border:0;background:transparent;padding:4px 12px;border-radius:5px;font-size:12.5px;font-weight:550;color:var(--ink-2);cursor:pointer}
+.mode-seg button[aria-pressed="true"]{background:var(--s0);color:var(--ink);box-shadow:var(--shadow-1)}
+.lang-list{list-style:none;margin:0;padding:0;display:grid;gap:7px}
+.lang-list li{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line-soft);border-radius:var(--r);background:var(--s0)}
+.lang-list .av{width:26px;height:26px;border-radius:7px;font-size:10.5px;flex:none}
+.lang-list .nm{display:grid;min-width:0;flex:1 1 auto}
+.lang-list .nm b{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lang-list .nm span{font-size:11.5px;color:var(--ink-4)}
+.lang-list select{width:auto;flex:none}
+div.f > .hp{font-size:11.5px;color:var(--ink-4)}
+div.f > .mode-seg{justify-self:start}

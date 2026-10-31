@@ -5,6 +5,11 @@ import * as Q from '../db/queries';
 import type { IngestAlert, IngestResult } from '../ingest/upsert';
 import { BUNDLE_MS, STALE_MS, decide, overdueLoops, type Tier } from './decide';
 import { TRAY_ICON } from './tray-icon';
+import { uiLang } from '../ui';
+
+/** English or Bahasa Indonesia, following the app language. */
+const L = (en: string, id: string): string => (uiLang() === 'id' ? id : en);
+const msgs = (n: number): string => L(n + (n === 1 ? ' new message' : ' new messages'), n + ' pesan baru');
 
 // macOS notifications, the Dock badge and the menu bar icon. Read-only: it shows things and opens
 // chats, and never sends anything to WhatsApp (scripts/check-send.mjs keeps main/notify off the send path).
@@ -94,7 +99,7 @@ export class Notifier {
     }
     if (groups.size > CATCH_UP_CHATS && !front) {
       const pinned = [...groups.values()].filter(g => g.tier === 'pinned').length;
-      this.post({ title: 'WA Turbo', body: groups.size + ' chats have new messages' + (pinned ? ' · ' + pinned + ' pinned' : ''), silent: true }, () => this.hooks?.open(null, null));
+      this.post({ title: 'WA Turbo', body: L(groups.size + ' chats have new messages', groups.size + ' chat punya pesan baru') + (pinned ? ' · ' + pinned + L(' pinned', ' disematkan') : ''), silent: true }, () => this.hooks?.open(null, null));
     } else {
       for (const [chatId, g] of groups) {
         const c = chats.get(chatId)!;
@@ -123,8 +128,8 @@ export class Notifier {
       id: 'chat-' + c.id,
       groupId: tier === 'pinned' ? 'pin-' + c.id : 'others',
       title: (tier === 'pinned' ? '📌 ' : '') + c.name,
-      subtitle: [tier === 'pinned' ? 'Pinned' : null, c.acct, sender].filter(Boolean).join(' · '),
-      body: last ? this.preview(last, count) : count + ' new messages',
+      subtitle: [tier === 'pinned' ? L('Pinned', 'Disematkan') : null, c.acct, sender].filter(Boolean).join(' · '),
+      body: last ? this.preview(last, count) : msgs(count),
       silent: quiet,
       ...(quiet ? {} : { sound }),
     }, () => this.hooks?.open(c.id, firstMsg), false);
@@ -145,8 +150,8 @@ export class Notifier {
     const first = this.banners.get(chatId)?.firstMsg ?? null;
     this.banners.get(chatId)?.n.close();
     const n = this.post({
-      id: 'chat-' + chatId, groupId: 'pin-' + chatId, title: '📌 ' + c.name, subtitle: 'Pinned · ' + c.acct,
-      body: 'Still unread · ' + c.unread + (c.unread === 1 ? ' message' : ' messages'),
+      id: 'chat-' + chatId, groupId: 'pin-' + chatId, title: '📌 ' + c.name, subtitle: L('Pinned', 'Disematkan') + ' · ' + c.acct,
+      body: L('Still unread · ' + c.unread + (c.unread === 1 ? ' message' : ' messages'), 'Masih belum dibaca · ' + c.unread + ' pesan'),
       silent: this.s.notifyPinnedSound === 'None', ...(this.s.notifyPinnedSound === 'None' ? {} : { sound: this.s.notifyPinnedSound }),
     }, () => this.hooks?.open(chatId, first), false);
     this.banners.set(chatId, { n, at: now, count: c.unread, firstMsg: first ?? '', tier: 'pinned' });
@@ -167,8 +172,8 @@ export class Notifier {
       const c = byId.get(loop.chatId)!;
       if (!this.seeded || quiet || (c.mutedUntil !== null && c.mutedUntil > now)) continue;
       this.post({
-        id: 'overdue-' + loop.id, groupId: 'pin-' + c.id, title: '📌 ' + c.name + ' is waiting on you',
-        subtitle: 'Pinned · ' + c.acct + ' · ' + fmtDur(waitedH) + ' without your reply', body: loop.topic,
+        id: 'overdue-' + loop.id, groupId: 'pin-' + c.id, title: '📌 ' + c.name + L(' is waiting on you', ' menunggu Anda'),
+        subtitle: L('Pinned', 'Disematkan') + ' · ' + c.acct + ' · ' + fmtDur(waitedH) + L(' without your reply', ' tanpa balasan Anda'), body: loop.topic,
         ...(this.s.notifyPinnedSound === 'None' ? { silent: true } : { sound: this.s.notifyPinnedSound }),
       }, () => this.hooks?.open(c.id, loop.msgId));
     }
@@ -186,9 +191,9 @@ export class Notifier {
 
   /** A sample of each tier, from Settings. */
   test(): void {
-    this.post({ title: '📌 Example pinned chat', subtitle: 'Pinned · test', body: 'This is how a pinned chat looks and sounds.',
+    this.post({ title: L('📌 Example pinned chat', '📌 Contoh chat disematkan'), subtitle: L('Pinned · test', 'Disematkan · tes'), body: L('This is how a pinned chat looks and sounds.', 'Begini tampilan dan suara chat yang disematkan.'),
       ...(this.s.notifyPinnedSound === 'None' ? { silent: true } : { sound: this.s.notifyPinnedSound }) }, () => this.hooks?.open(null, null));
-    setTimeout(() => this.post({ title: 'Example chat', subtitle: 'test', body: 'And this is every other chat.', groupId: 'others',
+    setTimeout(() => this.post({ title: L('Example chat', 'Contoh chat'), subtitle: L('test', 'tes'), body: L('And this is every other chat.', 'Dan ini untuk chat lainnya.'), groupId: 'others',
       ...(this.s.notifyOtherSound === 'None' ? { silent: true } : { sound: this.s.notifyOtherSound }) }, () => this.hooks?.open(null, null)), 2500);
   }
 
@@ -212,19 +217,19 @@ export class Notifier {
     const now = Date.now();
     const paused = this.s.notifyPausedUntil > now;
     const items: MenuItemConstructorOptions[] = [
-      { label: n ? n + (n === 1 ? ' pinned chat is' : ' pinned chats are') + ' waiting on your reply' : 'No pinned chat is waiting on you', enabled: false },
+      { label: n ? L(n + (n === 1 ? ' pinned chat is' : ' pinned chats are') + ' waiting on your reply', n + ' chat disematkan menunggu balasan Anda') : L('No pinned chat is waiting on you', 'Tidak ada chat disematkan yang menunggu Anda'), enabled: false },
       ...this.overdue.map(o => ({ label: o.name + ' · ' + fmtDur(o.waitedH), sublabel: o.acct + ' · ' + o.topic, click: () => this.hooks?.open(o.chatId, null) })),
       { type: 'separator' },
-      { label: 'Open WA Turbo', click: () => this.hooks?.open(null, null) },
+      { label: L('Open WA Turbo', 'Buka WA Turbo'), click: () => this.hooks?.open(null, null) },
       paused
-        ? { label: 'Resume notifications (paused until ' + new Date(this.s.notifyPausedUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ')',
+        ? { label: L('Resume notifications (paused until ', 'Lanjutkan notifikasi (dijeda sampai ') + new Date(this.s.notifyPausedUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ')',
             click: () => void this.hooks?.saveSettings({ notifyPausedUntil: 0 }) }
-        : { label: 'Pause notifications', submenu: [
-            { label: 'For 1 hour', click: () => void this.hooks?.saveSettings({ notifyPausedUntil: Date.now() + 3_600_000 }) },
-            { label: 'Until tomorrow 08:00', click: () => void this.hooks?.saveSettings({ notifyPausedUntil: tomorrowAt8() }) },
+        : { label: L('Pause notifications', 'Jeda notifikasi'), submenu: [
+            { label: L('For 1 hour', 'Selama 1 jam'), click: () => void this.hooks?.saveSettings({ notifyPausedUntil: Date.now() + 3_600_000 }) },
+            { label: L('Until tomorrow 08:00', 'Sampai besok 08:00'), click: () => void this.hooks?.saveSettings({ notifyPausedUntil: tomorrowAt8() }) },
           ] },
       { type: 'separator' },
-      { label: 'Quit WA Turbo', click: () => app.quit() },
+      { label: L('Quit WA Turbo', 'Keluar dari WA Turbo'), click: () => app.quit() },
     ];
     this.tray.setContextMenu(Menu.buildFromTemplate(items));
   }
@@ -235,8 +240,8 @@ export class Notifier {
   }
 
   private preview(m: Message, count: number): string {
-    const text = !this.s.notifyPreview ? 'New message' : m.text ? m.text.replace(/\s+/g, ' ').slice(0, 180) : Q.mediaLabel(m.type);
-    return count > 1 ? count + ' new messages' + (this.s.notifyPreview ? ' · ' + text : '') : text;
+    const text = !this.s.notifyPreview ? L('New message', 'Pesan baru') : m.text ? m.text.replace(/\s+/g, ' ').slice(0, 180) : Q.mediaLabel(m.type);
+    return count > 1 ? msgs(count) + (this.s.notifyPreview ? ' · ' + text : '') : text;
   }
 
   /** Shows one notification and keeps a reference until it is clicked or closed (click handlers need the object alive). */

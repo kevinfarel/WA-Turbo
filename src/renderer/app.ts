@@ -3,13 +3,19 @@
 // The only send in this file is sendFromComposer(): what you typed, when you press Send or Enter.
 
 import type { Bridge, PickedPhoto } from '@shared/ipc';
-import type { DbInfo,
+import type { ContactImportPreview, ContactSource, ContactsInfo, DbInfo,
   Account, Accent, AiProvider, AiStatus, AutoStatus, ChatInsight, ChatSummaryRow, Loop, Message, ModelId, PairState, Partner, PresetId, Report, RunProgress, Settings, SummaryResult, TeamMember, UsageBucket,
 } from '@shared/types';
-import { fmtDur, loopAge, loopPending, loopSla, SLA_LABEL, SLA_ORDER } from '@shared/sla';
+import { fmtDur, loopAge, loopPending, loopSla, setDurLang, SLA_LABEL, SLA_ORDER } from '@shared/sla';
 import { EMPTY_WEEK, MODEL_LABEL, PRESETS } from '@shared/presets';
 import { esc, fmtText } from './format';
 import { weekStart } from '@shared/week';
+import { lang, locale, setLang, startTranslating } from './i18n';
+import { applyTheme, isDark, onThemeChange, setMode, setTheme, THEMES, themeColours, themeFor, themeMode, toggleDark } from './theme';
+
+// Theme and language go on before anything is drawn; the window stays blank until then (themes.css).
+applyTheme();
+setDurLang(lang);
 
 declare global { interface Window { api: Bridge } }
 const api = window.api;
@@ -60,15 +66,15 @@ function dayLabel(t: number): string {
   const diff = Math.round((startOfDay(now()) - startOfDay(t)) / 86400000);
   if (diff === 0) return 'Today';
   if (diff === 1) return 'Yesterday';
-  return new Date(t).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+  return new Date(t).toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' });
 }
 function relTime(t: number): string {
   const h = (now() - t) / 3600000;
   if (h < 24 && dayKey(t) === dayKey(now())) return clock(t);
   const diff = Math.round((startOfDay(now()) - startOfDay(t)) / 86400000);
   if (diff === 1) return 'Yesterday';
-  if (diff < 7) return new Date(t).toLocaleDateString('en-GB', { weekday: 'short' });
-  return new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  if (diff < 7) return new Date(t).toLocaleDateString(locale, { weekday: 'short' });
+  return new Date(t).toLocaleDateString(locale, { day: 'numeric', month: 'short' });
 }
 function initials(name: string): string {
   const clean = name.replace(/\s*[—(].*$/, '').replace(/^\+/, '').trim();
@@ -107,6 +113,8 @@ const state = {
   usage: null as UsageBucket[] | null,
   usageUnit: 'day' as 'day' | 'week',
   db: null as DbInfo | null,
+  contacts: null as ContactsInfo | null,
+  ct: null as null | { data: Uint8Array; preview: ContactImportPreview; keep: Record<string, string> },
   dbPwShown: false,
   dbBusy: false,
   auto: null as AutoStatus | null,
@@ -152,7 +160,7 @@ function visibleChats(): ChatSummaryRow[] {
 }
 
 /* ============ summary labels ============ */
-const SHORT_DAY = new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+const SHORT_DAY = new Intl.DateTimeFormat(locale, { weekday: 'short', day: 'numeric', month: 'short' });
 const whenShort = (t: number): string => (dayKey(t) === dayKey(now()) ? '' : SHORT_DAY.format(new Date(t)).replace(',', '') + ' ') + clock(t);
 
 function windowLabel(key: string | null): string {
@@ -169,7 +177,7 @@ function sumUpLabel(c: ChatSummaryRow): { text: string; s: 'fresh' | 'stale' | '
   if (!c.lastSumAt) return { text: 'Not summed up yet', s: 'none', title: 'Summarize reads ' + windowText() + '.' };
   const text = 'Summed up ' + whenShort(c.lastSumAt) + ' · ' + (c.lastSumAuto ? 'auto' : 'you') + ' · ' + (c.newSince ? c.newSince + ' new since' : 'up to date');
   const checked = !c.pinned && c.autoCheckedAt && c.autoCheckedAt > c.lastSumAt ? ' Loops checked by auto summary ' + relTime(c.autoCheckedAt) + '.' : '';
-  return { text, s: c.newSince ? 'stale' : 'fresh', title: new Date(c.lastSumAt).toLocaleString('en-GB') + '.' + checked };
+  return { text, s: c.newSince ? 'stale' : 'fresh', title: new Date(c.lastSumAt).toLocaleString(locale) + '.' + checked };
 }
 
 const clockOrDay = (t: number): string => (dayKey(t) === dayKey(now()) ? clock(t) : SHORT_DAY.format(new Date(t)).split(' ').slice(0, 1).join(''));
@@ -204,7 +212,7 @@ function renderRail(): void {
     const pres = a.status === 'online' ? 'online' : a.status === 'logged_out' ? 'offline' : 'reconnecting';
     h += '<button type="button" class="acct" data-acct="' + a.id + '" aria-current="' + (state.acct === a.id && state.view === 'inbox') + '" style="--acc:' + ACCENT[a.accent] + '" title="' + esc(a.name + ' · ' + (a.desc || '') + ' · ' + a.phone) + '">' +
       '<span class="av" aria-hidden="true">' + esc(initials(a.name)) + '<span class="pres" data-s="' + pres + '"></span></span>' +
-      '<span class="nm od-truncate">' + esc(a.name) + '</span>' +
+      '<span class="nm od-truncate" translate="no">' + esc(a.name) + '</span>' +
       (u ? '<span class="badge">' + u + '</span>' : '') +
       '<span class="vh">' + esc((a.desc || '') + ', ' + a.phone + ', ' + statusWord(a) + (u ? ', ' + u + ' unread' : '')) + '</span></button>';
   });
@@ -223,7 +231,7 @@ function renderList(): void {
   const a = acctById(state.acct);
   const la = $('#listAcct');
   if (a) {
-    la.innerHTML = '<span class="adot" aria-hidden="true"></span><span class="od-truncate">' + esc(a.name) +
+    la.innerHTML = '<span class="adot" aria-hidden="true"></span><span class="od-truncate" translate="no">' + esc(a.name) +
       (a.desc ? ' · ' + esc(a.desc) : '') + '</span><span class="ph od-nowrap od-fill">' + esc(a.phone) + '</span>';
     la.style.setProperty('--acc', ACCENT[a.accent]);
   } else la.innerHTML = '';
@@ -254,9 +262,9 @@ function renderList(): void {
     return head + '<button type="button" class="row" data-chat="' + c.id + '" aria-current="' + (state.chat === c.id) + '" style="--acc:' + accentOf(c) + '">' +
       '<span class="av' + (c.kind === 'group' ? ' grp' : '') + '" aria-hidden="true">' + esc(initials(c.name)) + '</span>' +
       '<span class="row-main">' +
-        '<span class="row-top">' + (c.pinned ? '<span class="row-pin" title="Pinned">' + icon('pin', 11) + '</span>' : '') + (isMuted(c) ? '<span class="row-pin muted" title="' + esc(mutedLabel(c)) + '">' + icon('belloff', 11) + '</span>' : '') + '<span class="row-nm od-fill od-truncate">' + esc(c.name) + '</span><span class="row-t od-nowrap">' + esc(relTime(c.lastAt)) + '</span></span>' +
+        '<span class="row-top">' + (c.pinned ? '<span class="row-pin" title="Pinned">' + icon('pin', 11) + '</span>' : '') + (isMuted(c) ? '<span class="row-pin muted" title="' + esc(mutedLabel(c)) + '">' + icon('belloff', 11) + '</span>' : '') + '<span class="row-nm od-fill od-truncate" translate="no">' + esc(c.name) + '</span><span class="row-t od-nowrap">' + esc(relTime(c.lastAt)) + '</span></span>' +
         '<span class="row-bot">' +
-          '<span class="row-msg od-fill od-truncate">' + esc(who + c.lastText) + '</span>' +
+          '<span class="row-msg od-fill od-truncate">' + esc(who) + '<span translate="no">' + esc(c.lastText) + '</span></span>' +
           (owed ? '<span class="tag owe">' + icon('reply', 10) + owed + '</span>' : '') +
           (waiting ? '<span class="tag wait">' + icon('hour', 10) + waiting + '</span>' : '') +
           (c.lastSumAt ? '<span class="tag sum" title="' + esc(sumUpLabel(c).text) + '">AI ' + esc(clockOrDay(c.lastSumAt)) + '</span>' : '') +
@@ -283,7 +291,7 @@ function mediaFigure(m: Message): string {
     : '<span class="sh-thumb ph">' + icon('doc', 18) + '<span>' + esc(MEDIA_WORD[m.type] || 'File') + '</span></span>';
   const read = m.type === 'image' && state.settings.aiImages;
   return '<figure class="shot' + (isImg ? '' : ' file') + '">' + thumb +
-    '<figcaption class="sh-meta"><b class="od-truncate">' + esc(name) + '</b>' +
+    '<figcaption class="sh-meta"><b class="od-truncate" translate="no">' + esc(name) + '</b>' +
     '<span class="sh-ai"' + (read ? ' data-on="true"' : '') + '>' + icon(read ? 'spark' : 'doc', 10) + (read ? 'Read by AI' : 'Not read by AI') + '</span>' +
     (m.media ? '<button type="button" class="sh-save" data-save-media="' + m.id + '" title="Save to this Mac" aria-label="Save ' + esc(name) + ' to this Mac">' + icon('save', 12) + '</button>' : '') +
     '</figcaption></figure>';
@@ -417,13 +425,13 @@ function renderConvo(): void {
     const editing = state.editing?.msgId === m.id;
     body += '<div class="msg' + (mine ? ' me' : '') + (al ? ' anchored' : '') + '"' + (al ? ' data-d="' + al.dir + '"' : '') +
       ' id="msg-' + c.id + '-' + m.id + '" data-mid="' + m.id + '" style="--acc:' + accentOf(c) + '">' +
-      (!mine && c.kind === 'group' ? '<span class="who">' + esc(m.who) + (m.team ? '<span class="team-tag">Team</span>' : '') + '</span>' : '') +
+      (!mine && c.kind === 'group' ? '<span class="who"><span translate="no">' + esc(m.who) + '</span>' + (m.team ? '<span class="team-tag">Team</span>' : '') + '</span>' : '') +
       (editing
         ? '<div class="edit-box"><label><span class="vh">Edit message</span><textarea id="editBox" rows="1">' + esc(state.editing!.text) + '</textarea></label>' +
             '<div class="edit-acts"><span class="od-fill hint">Enter to save · Shift+Enter for a new line · Esc to cancel</span>' +
             '<button type="button" class="btn btn-sm" id="editCancel">Cancel</button>' +
             '<button type="button" class="btn btn-sm btn-primary" id="editSave">Save</button></div></div>'
-        : m.text ? '<span class="tx">' + fmtText(m.text) + '</span>' : '') +
+        : m.text ? '<span class="tx" translate="no">' + fmtText(m.text) + '</span>' : '') +
       mediaFigure(m) +
       '<div class="mt-row">' + tools +
         '<button type="button" class="icon-btn mmore" data-msgmenu="' + m.id + '" title="More" aria-label="Message options">' + icon('more', 15) + '</button>' +
@@ -447,7 +455,7 @@ function renderConvo(): void {
     '<div class="convo-head">' +
       '<button type="button" class="icon-btn mob-back" id="convoBack" aria-label="Back to chat list">' + icon('back', 18) + '</button>' +
       '<span class="av" aria-hidden="true" style="background:' + accentOf(c) + '">' + esc(initials(c.name)) + '</span>' +
-      '<span class="od-field od-fill"><span class="ch-nm od-truncate">' + esc(c.name) + '</span>' +
+      '<span class="od-field od-fill"><span class="ch-nm od-truncate" translate="no">' + esc(c.name) + '</span>' +
         '<span class="ch-sub od-truncate">' + esc(((p ? [p.id, c.service || p.service].filter(Boolean).join(' · ') : c.org) || '') + ' · via ' + (a?.name ?? '') + ' ' + (a?.phone ?? '')) + '</span></span>' +
       '<span class="sumup-at od-truncate" data-s="' + sumUpLabel(c).s + '" title="' + esc(sumUpLabel(c).title) + '">' + esc(sumUpLabel(c).text) + '</span>' +
       '<button type="button" class="icon-btn" id="pinBtn" aria-pressed="' + c.pinned + '" title="' + (c.pinned ? 'Unpin chat' : 'Pin chat: auto summary every ' + state.settings.pinEveryMin + ' min') + '" aria-label="' + (c.pinned ? 'Unpin chat' : 'Pin chat') + '">' + icon('pin', 16) + '</button>' +
@@ -615,17 +623,17 @@ function renderPanel(): void {
     const debt = loopsOf(c.id).sort((x, y) => pending(y) - pending(x));
     body.innerHTML =
       '<div class="card"><div class="od-row" style="--od-gap:7px;margin-bottom:7px">' +
-        '<h3 class="od-fill od-truncate">' + esc(c.name) + '</h3>' +
+        '<h3 class="od-fill od-truncate" translate="no">' + esc(c.name) + '</h3>' +
         '<span class="kv od-nowrap">' + esc(sm.result.msgCount + ' msgs') + '</span></div>' +
-        '<p style="font-size:13px;color:var(--ink-2);line-height:1.6">' + esc(r.summary) + '</p>' +
+        '<p style="font-size:13px;color:var(--ink-2);line-height:1.6" translate="no">' + esc(r.summary) + '</p>' +
         '<p class="kv" style="margin-top:9px">' + esc([MODEL_LABEL[sm.result.model], windowLabel(sm.result.windowKey), whenShort(sm.result.createdAt),
           sm.result.skipped ? sm.result.skipped + ' earlier this week left out' : ''].filter(Boolean).join(' · ')) + '</p>' +
         (sm.result.cached ? '<p class="kv" style="margin-top:4px">No new messages since then, so Claude was not called. Run again to read it fresh.</p>' : '') +
       '</div>' +
       (debt.length ? '<div class="card sum-block"><h4>Reply debt detected · ' + debt.length + '</h4>' +
         debt.map(l =>
-          '<div class="act"><span class="t">' + esc(l.topic) + '</span>' +
-          (l.aiHint ? '<span class="ai-hint">' + icon('bolt', 12) + '<span>' + esc(l.aiHint) + '</span></span>' : '') +
+          '<div class="act"><span class="t" translate="no">' + esc(l.topic) + '</span>' +
+          (l.aiHint ? '<span class="ai-hint">' + icon('bolt', 12) + '<span translate="no">' + esc(l.aiHint) + '</span></span>' : '') +
           '<span class="m">' +
             '<span class="dirtag" data-d="' + l.dir + '">' + icon(l.dir === 'owed' ? 'reply' : 'hour', 10) + (l.dir === 'owed' ? 'You owe' : 'Waiting') + '</span>' +
             '<span class="od-nowrap">' + esc(fmtDur(age(l))) + '</span>' +
@@ -636,12 +644,12 @@ function renderPanel(): void {
               : '<button type="button" class="cite" data-lact="' + (l.dir === 'owed' ? 'open' : 'nudge') + '" data-loop="' + l.id + '">' + (l.dir === 'owed' ? 'Go to message' : 'Log nudge') + '</button>') +
           '</span></div>').join('') +
         '<div class="od-row" style="--od-gap:8px;margin-top:9px"><button type="button" class="btn btn-sm od-fill" id="openTracker">' + icon('clock', 13) + 'Open in tracker</button></div></div>' : '') +
-      (r.highlights.length ? '<div class="card sum-block"><h4>Highlights</h4><ul class="bullets">' + r.highlights.map(x => '<li><span>' + esc(x) + '</span></li>').join('') + '</ul></div>' : '') +
+      (r.highlights.length ? '<div class="card sum-block"><h4>Highlights</h4><ul class="bullets">' + r.highlights.map(x => '<li><span translate="no">' + esc(x) + '</span></li>').join('') + '</ul></div>' : '') +
       (r.actions.length ? '<div class="card sum-block"><h4>Action items · ' + r.actions.length + '</h4>' +
-        r.actions.map(x => '<div class="act"><span class="t">' + esc(x.t) + '</span><span class="m">' +
+        r.actions.map(x => '<div class="act"><span class="t" translate="no">' + esc(x.t) + '</span><span class="m">' +
           '<span class="owner">' + esc(x.owner) + '</span><span class="od-nowrap">' + esc(x.due) + '</span>' +
           '<span class="od-fill"></span>' + citeBtn(c.id, x.cite) + '</span></div>').join('') + '</div>' : '') +
-      (r.questions.length ? '<div class="card sum-block"><h4>Open questions</h4><ul class="bullets">' + r.questions.map(x => '<li><span>' + esc(x) + '</span></li>').join('') + '</ul></div>' : '') +
+      (r.questions.length ? '<div class="card sum-block"><h4>Open questions</h4><ul class="bullets">' + r.questions.map(x => '<li><span translate="no">' + esc(x) + '</span></li>').join('') + '</ul></div>' : '') +
       '<div class="od-row" style="--od-gap:8px">' +
         '<button type="button" class="btn btn-sm" id="copySummary">' + icon('copy', 13) + 'Copy</button>' +
         '<button type="button" class="btn btn-sm" id="resummarize">' + icon('refresh', 13) + 'Run again</button>' +
@@ -731,20 +739,20 @@ function loopRow(l: Loop): string {
         '<span class="kindtag">' + esc(LOOP_KIND[l.kind] || l.kind) + '</span>' +
         (l.source === 'rule' ? '<span class="kindtag auto">auto · local rule</span>' : l.source === 'ai' ? '<span class="kindtag auto">found by Claude</span>' : '') +
       '</div>' +
-      '<p class="loop-q">' + esc(l.topic) + '</p>' +
+      '<p class="loop-q" translate="no">' + esc(l.topic) + '</p>' +
       '<p class="loop-meta">' +
         '<span>' + esc(owed || l.askedBy !== 'You' ? 'Asked by ' + l.askedBy : 'You asked ' + (c ? c.name : '')) + '</span>' +
-        '<span>·</span><span>' + esc(c ? c.name : '') + '</span>' +
+        '<span>·</span><span translate="no">' + esc(c ? c.name : '') + '</span>' +
         (l.msgId ? '<span>·</span>' + citeBtn(l.chatId, l.msgId, loopCiteLabel(l)) : '') +
       '</p>' +
       '<div class="loop-chips">' +
-        (c ? '<span class="bchip" data-k="plat" style="--acc:' + accentOf(c) + '"><span class="adot" aria-hidden="true"></span>' + esc(acctById(c.acct)?.name ?? '') + '</span>' : '') +
+        (c ? '<span class="bchip" data-k="plat" style="--acc:' + accentOf(c) + '"><span class="adot" aria-hidden="true"></span><span translate="no">' + esc(acctById(c.acct)?.name ?? '') + '</span></span>' : '') +
         (c && c.partner ? '<span class="bchip" data-k="partner">' + icon('tag', 10) + esc(c.partner) + '</span>' : '') +
         (ptypeOf(c) ? '<span class="bchip" data-k="ptype">' + esc(ptypeOf(c)) + '</span>' : '') +
         (c && (c.service || partnerOf(c)?.service) ? '<span class="bchip">' + esc((c.service || partnerOf(c)!.service)!) + '</span>' : '') +
         (c && c.stage ? '<span class="bchip" data-k="stage">' + esc(c.stage) + '</span>' : '') +
       '</div>' +
-      (l.aiHint && l.state === 'open' ? '<p class="ai-hint">' + icon('bolt', 12) + '<span>' + esc(l.aiHint) + '</span></p>' : '') +
+      (l.aiHint && l.state === 'open' ? '<p class="ai-hint">' + icon('bolt', 12) + '<span translate="no">' + esc(l.aiHint) + '</span></p>' : '') +
       (l.blocks ? '<p class="loop-note">' + icon('warn', 12) + '<span>Blocking: ' + esc(l.blocks) + '</span></p>' : '') +
       (nudged && l.state === 'open' ? '<p class="loop-note">' + icon('bell', 12) + '<span>Nudged ' + nudged + '×, last ' + fmtDur((now() - l.nudges[0]) / 3600000) + ' ago</span></p>' : '') +
       (l.chases && l.state === 'open' && owed ? '<p class="loop-note">' + icon('bell', 12) + '<span>They chased ' + l.chases + '×</span></p>' : '') +
@@ -866,13 +874,13 @@ function renderReportDoc(): void {
   const byChat = r.chatIds.map(id => ({ id, name: chatName(id), c: chatById(id), i: insightOf(r, id) }));
   const rLoops = r.loopIds.map(loopById).filter(Boolean) as Loop[];
 
-  const grp = (name: string, extra = '') => '<span class="lbl">' + icon('chev', 12) + esc(name) + extra + '</span>';
+  const grp = (name: string, extra = '') => '<span class="lbl">' + icon('chev', 12) + '<span translate="no">' + esc(name) + '</span>' + extra + '</span>';
   const actionsSec = () => {
     const groups = byChat.filter(x => x.i.actions.length);
     if (!groups.length) return '<div class="sec"><h2>Action items</h2><p style="font-size:13px;color:var(--ink-3)">Nothing was committed to in these chats during the window.</p></div>';
     return '<div class="sec"><h2>Action items · ' + r.stats.actions + '</h2>' + groups.map(x =>
       '<div class="grp">' + grp(x.name, x.c ? '<span class="kv">' + esc(acctById(x.c.acct)?.name ?? '') + '</span>' : '') +
-      x.i.actions.map(a => '<div class="act"><span class="t">' + esc(a.t) + '</span><span class="m">' +
+      x.i.actions.map(a => '<div class="act"><span class="t" translate="no">' + esc(a.t) + '</span><span class="m">' +
         '<span class="owner">' + esc(a.owner) + '</span><span class="od-nowrap">' + icon('clock', 11) + ' ' + esc(a.due) + '</span>' +
         '<span class="od-fill"></span>' + citeBtn(x.id, a.cite) + '</span></div>').join('') + '</div>').join('') + '</div>';
   };
@@ -880,11 +888,11 @@ function renderReportDoc(): void {
     const groups = byChat.filter(x => pick(x.i).length);
     if (!groups.length) return emptyText ? '<div class="sec"><h2>' + title + '</h2><p style="font-size:13px;color:var(--ink-3)">' + emptyText + '</p></div>' : '';
     return '<div class="sec"><h2>' + title + '</h2>' + groups.map(x => '<div class="grp">' + grp(x.name) + '<ul class="bullets">' +
-      pick(x.i).map(h => '<li><span>' + esc(h) + '</span></li>').join('') + '</ul></div>').join('') + '</div>';
+      pick(x.i).map(h => '<li><span translate="no">' + esc(h) + '</span></li>').join('') + '</ul></div>').join('') + '</div>';
   };
   const statusSec = () => '<div class="sec"><h2>Status by conversation</h2><div class="ctable">' + byChat.map(x =>
-    '<div class="crow"><span class="od-field"><span class="nm od-truncate">' + esc(x.name) + (x.c?.org ? ' · ' + esc(x.c.org) : '') + '</span>' +
-    '<span class="st od-truncate">' + esc(x.i.status.stage + ' — next: ' + x.i.status.next) + '</span></span>' +
+    '<div class="crow"><span class="od-field"><span class="nm od-truncate" translate="no">' + esc(x.name) + (x.c?.org ? ' · ' + esc(x.c.org) : '') + '</span>' +
+    '<span class="st od-truncate" translate="no">' + esc(x.i.status.stage + ' — next: ' + x.i.status.next) + '</span></span>' +
     '<span class="risk od-nowrap" data-r="' + x.i.status.risk + '">' + esc(x.i.status.risk) + '</span></div>').join('') + '</div></div>';
   const debtSec = () => {
     if (!rLoops.length) return '<div class="sec"><h2>Reply debt</h2><p style="font-size:13px;color:var(--ink-3)">No open loops in these chats — nothing is waiting on either side.</p></div>';
@@ -893,8 +901,8 @@ function renderReportDoc(): void {
       if (!set.length) return '';
       return '<div class="sec"><h2>' + title + ' · ' + set.length + '</h2>' + set.map(l => {
         const c = chatById(l.chatId);
-        return '<div class="act"><span class="t">' + esc(l.topic) + '</span><span class="m">' +
-          '<span class="owner">' + esc(c ? c.name : '') + '</span>' +
+        return '<div class="act"><span class="t" translate="no">' + esc(l.topic) + '</span><span class="m">' +
+          '<span class="owner" translate="no">' + esc(c ? c.name : '') + '</span>' +
           (c && c.partner ? '<span class="bchip" data-k="partner">' + esc(c.partner) + '</span>' : '') +
           '<span class="od-nowrap">' + icon('clock', 11) + ' ' + esc(fmtDur(age(l))) + '</span>' +
           '<span class="slatag" data-s="' + sla(l) + '">' + esc(SLA_LABEL[sla(l)]) + '</span>' +
@@ -917,7 +925,7 @@ function renderReportDoc(): void {
         '<span class="risk od-nowrap" data-r="' + (owed ? 'high' : 'watch') + '">' + esc(fmtDur(Math.max(...mine.map(age)))) + '</span></div>';
     }).join('') + '</div></div>';
   };
-  const overviewSec = () => '<div class="sec"><h2>Overview</h2><p>' + esc(r.overview) + '</p>' +
+  const overviewSec = () => '<div class="sec"><h2>Overview</h2><p translate="no">' + esc(r.overview) + '</p>' +
     '<p class="src">' + icon('bolt', 12) + esc(MODEL_LABEL[r.model] + ' · ' + r.stats.msgs + ' messages read · ' + RANGE_LABEL[r.days]) + '</p></div>';
 
   let secs: string;
@@ -927,13 +935,13 @@ function renderReportDoc(): void {
   else if (r.presetId === 'decisions') secs = listSec('Decisions and commitments', i => i.decisions, 'No decisions were recorded in these chats during the window.') + listSec('Open questions · ' + r.stats.questions, i => i.questions);
   else if (r.presetId === 'client') secs = statusSec() + actionsSec();
   else if (r.presetId === 'debt') secs = overviewSec() + debtSec() + partnerSec();
-  else secs = '<div class="sec"><h2>Your prompt</h2><p style="font-style:italic;color:var(--ink-3)">“' + esc(r.custom) + '”</p></div>' + overviewSec() + listSec('Highlights', i => i.highlights) + actionsSec();
+  else secs = '<div class="sec"><h2>Your prompt</h2><p style="font-style:italic;color:var(--ink-3)" translate="no">“' + esc(r.custom) + '”</p></div>' + overviewSec() + listSec('Highlights', i => i.highlights) + actionsSec();
 
   const d = new Date(r.createdAt);
   host.innerHTML = '<div class="doc"><div class="doc-head">' +
     '<button type="button" class="icon-btn mob-back" id="repBack" aria-label="Back to report list">' + icon('back', 18) + '</button>' +
     '<h1>' + esc(r.title) + '</h1>' +
-    '<div class="doc-meta"><span>' + esc(d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) + ', ' + clock(r.createdAt)) + '</span>' +
+    '<div class="doc-meta"><span>' + esc(d.toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short' }) + ', ' + clock(r.createdAt)) + '</span>' +
       '<span>' + esc(RANGE_LABEL[r.days]) + '</span><span>' + esc(MODEL_LABEL[r.model]) + '</span></div>' +
     '<div class="stats">' + (r.presetId === 'debt'
       ? stat(r.stats.owed, 'on your reply') + stat(r.stats.waiting, 'on the other side') + stat(r.stats.overdue, 'past SLA') + stat(r.stats.longestH ? fmtDur(r.stats.longestH) : '—', 'longest open')
@@ -952,7 +960,7 @@ function reportMarkdown(r: Report): string {
   const L: string[] = [];
   const mname = MODEL_LABEL[r.model];
   L.push('# ' + r.title, '');
-  L.push('*' + new Date(r.createdAt).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + ', ' + clock(r.createdAt) + ' · ' + RANGE_LABEL[r.days] + ' · ' + mname + '*', '');
+  L.push('*' + new Date(r.createdAt).toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + ', ' + clock(r.createdAt) + ' · ' + RANGE_LABEL[r.days] + ' · ' + mname + '*', '');
   if (r.presetId === 'debt') L.push('- Waiting on your reply: ' + r.stats.owed, '- Waiting on the other side: ' + r.stats.waiting, '- Past SLA: ' + r.stats.overdue, '- Longest open loop: ' + (r.stats.longestH ? fmtDur(r.stats.longestH) : 'none'), '');
   else L.push('- Chats read: ' + r.stats.chats, '- Messages: ' + r.stats.msgs, '- Action items: ' + r.stats.actions, '- Open questions: ' + r.stats.questions, '');
   if (r.custom) L.push('## Prompt', '', '> ' + r.custom, '');
@@ -997,9 +1005,12 @@ function renderSettings(): void {
   $<HTMLInputElement>('#autoOn').checked = state.settings.autoOn;
   (['pinEveryMin', 'pinWindow', 'otherEveryMin', 'otherWindow'] as const).forEach(k => { $<HTMLSelectElement>('#' + k).value = String(state.settings[k]); });
   renderNotifySettings();
+  renderAppearance();
+  renderLangList();
   renderTeam();
   void loadUsage();
   void loadDb();
+  void loadContacts();
   const pins = state.chats.filter(c => c.pinned).length;
   $('#autoPinned').textContent = pins ? pins + ' pinned' : 'No pinned chats yet';
   renderAutoState();
@@ -1027,6 +1038,43 @@ function renderSettings(): void {
     '<p class="kv">' + esc(p.blurb) + '</p></div>').join('');
 }
 
+/* --- Appearance, app language and summary language (Settings) --- */
+function renderAppearance(): void {
+  $<HTMLSelectElement>('#appLang').value = lang;
+  $$('[data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === themeMode())));
+  const card = (t: (typeof THEMES)[number]) => {
+    const [side, page, bubble, accent] = t.swatch;
+    return '<button type="button" class="theme-card" data-theme-id="' + t.id + '" aria-pressed="' + (themeFor(t.dark) === t.id) + '">' +
+      '<span class="sw" aria-hidden="true"><i style="background:' + side + '"></i><span class="main" style="background:' + page + '"><b style="background:' + bubble + '"></b><b style="background:' + accent + '"></b></span></span>' +
+      '<span translate="no">' + esc(t.name) + '</span></button>';
+  };
+  $('#lightThemes').innerHTML = THEMES.filter(t => !t.dark).map(card).join('');
+  $('#darkThemes').innerHTML = THEMES.filter(t => t.dark).map(card).join('');
+}
+
+function renderLangList(): void {
+  const host = $('#langList');
+  if (!state.accounts.length) { host.innerHTML = '<li><span class="kv">Link a number first. Its language is picked from its first conversations.</span></li>'; return; }
+  host.innerHTML = state.accounts.map(a => {
+    const note = !a.lang ? (state.ai.connected ? 'Not picked yet · detecting from its first 10 conversations' : 'Not picked yet · detected once Claude is connected; English until then')
+      : a.langDetected ? 'Detected from its first conversations' : 'Picked by you';
+    return '<li><span class="av" aria-hidden="true" style="background:' + ACCENT[a.accent] + '">' + esc(initials(a.name)) + '</span>' +
+      '<span class="nm"><b translate="no">' + esc(a.name) + '</b><span>' + esc(note) + '</span></span>' +
+      '<label><span class="vh">Summary language for ' + esc(a.name) + '</span><select data-numlang="' + a.id + '">' +
+        '<option value="en"' + (a.lang === 'en' ? ' selected' : '') + '>English</option>' +
+        '<option value="id"' + (a.lang === 'id' ? ' selected' : '') + '>Bahasa Indonesia</option>' +
+        (a.lang ? '' : '<option value="" selected>English (until detected)</option>') +
+      '</select></label>' +
+      (a.lang && state.ai.connected ? '<button type="button" class="btn btn-sm" data-redetect="' + a.id + '" title="Read its 10 most recent conversations again">Detect again</button>' : '') +
+    '</li>';
+  }).join('');
+}
+
+/** Tells the main process the language and theme colours (native menus, window background, notifications). */
+function reportUi(): void {
+  void api.setUiPrefs({ lang, mode: themeMode(), dark: isDark(), ...themeColours() }).catch(() => {});
+}
+
 /* --- Claude usage (Settings) --- */
 const USAGE_DAYS = 14;
 const USAGE_WEEKS = 8;
@@ -1037,7 +1085,7 @@ const ACROSS = '#8a8f98';
 
 const tokensOf = (b: UsageBucket): number => b.input + b.output + b.cacheRead + b.cacheWrite;
 const fmtTok = (n: number): string => n < 1000 ? String(n) : n < 1e6 ? (n / 1000).toFixed(n < 1e4 ? 1 : 0).replace(/\.0$/, '') + 'k' : (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
-const fmtFull = (n: number): string => n.toLocaleString('en-US');
+const fmtFull = (n: number): string => n.toLocaleString(locale);
 
 interface UsageSeries { key: string; name: string; color: string }
 
@@ -1057,14 +1105,14 @@ function usageBuckets(): { label: string; long: string; start: number; end: numb
     for (let i = USAGE_DAYS - 1; i >= 0; i--) {
       const s = new Date(d0); s.setDate(d0.getDate() - i);
       const e = new Date(s); e.setDate(s.getDate() + 1);
-      out.push({ label: s.toLocaleDateString('en-GB', { day: 'numeric' }), long: i === 0 ? 'Today' : s.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }), start: s.getTime(), end: e.getTime() });
+      out.push({ label: s.toLocaleDateString(locale, { day: 'numeric' }), long: i === 0 ? 'Today' : s.toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short' }), start: s.getTime(), end: e.getTime() });
     }
   } else {
     const w0 = weekStart(now);
     for (let i = USAGE_WEEKS - 1; i >= 0; i--) {
       const s = new Date(w0); s.setDate(w0.getDate() - 7 * i);
       const e = new Date(s); e.setDate(s.getDate() + 7);
-      out.push({ label: s.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }), long: i === 0 ? 'This week' : 'Week of ' + s.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }), start: s.getTime(), end: e.getTime() });
+      out.push({ label: s.toLocaleDateString(locale, { day: 'numeric', month: 'short' }), long: i === 0 ? 'This week' : 'Week of ' + s.toLocaleDateString(locale, { day: 'numeric', month: 'short' }), start: s.getTime(), end: e.getTime() });
     }
   }
   return out;
@@ -1175,6 +1223,82 @@ function showUsageTip(hit: Element): void {
   const tw = tip.offsetWidth;
   tip.style.left = Math.max(0, Math.min(chart.clientWidth - tw, cx - tw / 2)) + 'px';
   $$('#usageChart .hit').forEach(h => h.classList.toggle('on', h === hit));
+}
+
+/* ============ contacts (.vcf import) ============ */
+async function loadContacts(): Promise<void> {
+  state.contacts = await api.contactsInfo().catch(() => null);
+  const c = state.contacts;
+  const el = document.getElementById('contactsFacts'); if (!el) return;
+  el.textContent = c?.count
+    ? c.count.toLocaleString() + ' names from your contacts · last import ' + new Date(c.updatedAt!).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    : 'No contacts imported yet.';
+  $('#contactsClear').hidden = !c?.count;
+}
+
+const CT_FROM: Record<ContactSource, string> = { file: 'in this file', import: 'your last import', phone: 'saved on the phone (WhatsApp)' };
+
+async function readVcf(file: File | undefined): Promise<void> {
+  if (!file) return;
+  if (!/\.vcf$/i.test(file.name) && !/vcard/i.test(file.type)) { toast('Choose a .vcf file exported from your phone’s Contacts.', 'bad'); return; }
+  try {
+    const data = new Uint8Array(await file.arrayBuffer());
+    const preview = await api.previewContacts(data, file.name, null);
+    state.ct = { data, preview, keep: Object.fromEntries(preview.duplicates.map(d => [d.phone, d.keep])) };
+    renderContactsDlg();
+    openDlg('#dlgContacts');
+  } catch (e) { fail(e); }
+}
+
+function renderContactsDlg(): void {
+  const ct = state.ct; if (!ct) return;
+  const p = ct.preview;
+  const n = (v: number, one: string, many = one + 's') => v.toLocaleString() + ' ' + (v === 1 ? one : many);
+  $('#ctSub').textContent = p.fileName;
+  $('#ctSummary').textContent = n(p.cards, 'contact') + ' read · ' + n(p.numbers, 'number') + ' · ' + p.added.toLocaleString() + ' new · ' +
+    p.unchanged.toLocaleString() + ' already named the same' + (p.skipped ? ' · ' + n(p.skipped, 'contact') + ' skipped (no name or phone number)' : '');
+  const cc = $<HTMLInputElement>('#ctCountry');
+  if (document.activeElement !== cc) cc.value = p.countryCode;
+  $('#ctDupWrap').hidden = !p.duplicates.length;
+  $('#ctDupTitle').textContent = n(p.duplicates.length, 'number has', 'numbers have') + ' more than one name';
+  $('#ctDups').innerHTML = p.duplicates.map(d => '<li><div class="ct-num"><b>' + esc(d.display) + '</b>' + (d.chat ? '<span class="kv">Chat now shows “' + esc(d.chat) + '”</span>' : '<span class="kv">No chat yet</span>') + '</div>' +
+    '<div class="ct-opts">' + d.options.map(o => '<label class="ct-opt"><input type="radio" name="ct-' + d.phone + '" data-ctphone="' + d.phone + '" value="' + esc(o.name) + '"' +
+      (ct.keep[d.phone] === o.name ? ' checked' : '') + '><span class="od-fill"><b>' + esc(o.name) + '</b><span class="kv">' + o.from.map(f => CT_FROM[f]).join(' · ') + '</span></span></label>').join('') +
+    '</div></li>').join('');
+  $('#ctGo').textContent = 'Import ' + n(p.numbers, 'number');
+}
+
+function bulkKeep(which: 'file' | 'current'): void {
+  const ct = state.ct; if (!ct) return;
+  for (const d of ct.preview.duplicates) {
+    const o = which === 'file' ? d.options.find(x => x.from.includes('file')) : d.options.find(x => x.from.includes('import')) ?? d.options.find(x => x.from.includes('phone'));
+    if (o) ct.keep[d.phone] = o.name;
+  }
+  renderContactsDlg();
+}
+
+async function recountry(code: string): Promise<void> {
+  const ct = state.ct; if (!ct || !/^\d{1,3}$/.test(code) || code === ct.preview.countryCode) return;
+  try {
+    const preview = await api.previewContacts(ct.data, ct.preview.fileName, code);
+    const keep = Object.fromEntries(preview.duplicates.map(d => [d.phone, d.options.some(o => o.name === ct.keep[d.phone]) ? ct.keep[d.phone] : d.keep]));
+    state.ct = { data: ct.data, preview, keep };
+    renderContactsDlg();
+  } catch (e) { fail(e); }
+}
+
+async function importContacts(): Promise<void> {
+  const ct = state.ct; if (!ct) return;
+  const go = $<HTMLButtonElement>('#ctGo');
+  go.disabled = true;
+  try {
+    const r = await api.applyContacts(ct.preview.token, ct.keep);
+    closeDlg($<HTMLDialogElement>('#dlgContacts'));
+    state.ct = null;
+    toast('Imported ' + r.saved.toLocaleString() + ' names · ' + r.renamedChats.toLocaleString() + (r.renamedChats === 1 ? ' chat' : ' chats') + ' renamed', 'ok');
+    void loadContacts();
+    state.team = await api.listTeam().catch(() => state.team); renderTeam();
+  } catch (e) { fail(e); } finally { go.disabled = false; }
 }
 
 async function loadDb(): Promise<void> {
@@ -1573,6 +1697,17 @@ document.addEventListener('click', e => {
   const t = e.target as HTMLElement;
   if (!t.closest('#acctMenu')) closeAcctMenu();
 
+  if (t.closest('#themeToggle')) { toggleDark(); return; }
+  const md = t.closest<HTMLElement>('[data-mode]');
+  if (md) { setMode(md.dataset.mode as 'light' | 'dark' | 'system'); return; }
+  const th = t.closest<HTMLElement>('[data-theme-id]');
+  if (th) { setTheme(th.dataset.themeId!); return; }
+  const rd = t.closest<HTMLElement>('[data-redetect]');
+  if (rd) {
+    void api.setNumberLang(rd.dataset.redetect!, null).then(a => { state.accounts = a; renderLangList(); toast('Detecting the language again from its first conversations'); }).catch(fail);
+    return;
+  }
+
   const dc = t.closest<HTMLElement>('[data-dbcopy]');
   if (dc) { void copyText(dc.dataset.dbcopy ?? '', dc.dataset.dblabel ?? 'Value'); return; }
 
@@ -1807,6 +1942,15 @@ document.addEventListener('click', e => {
     case 'cfGo': closeDlg($<HTMLDialogElement>('#dlgConfirm')); if (pendingConfirm) { const p = pendingConfirm; pendingConfirm = null; p(); } return;
     case 'expCopy': void copyText($('#expOut').textContent ?? '', 'Markdown'); return;
     case 'dbRetry': void bootDb(() => api.retryDb()); return;
+    case 'vcfPick': $<HTMLInputElement>('#vcfFile').click(); return;
+    case 'ctUseFile': bulkKeep('file'); return;
+    case 'ctKeepCurrent': bulkKeep('current'); return;
+    case 'ctGo': void importContacts(); return;
+    case 'contactsClear':
+      confirmDlg('Remove imported names', 'Chats go back to the names WhatsApp has. You can import your contacts again any time.', 'Remove', () => {
+        void api.clearContacts().then(n => { toast(n.toLocaleString() + ' imported names removed', 'ok'); void loadContacts(); }).catch(fail);
+      });
+      return;
     case 'dbShow': case 'dbFolder': void api.showDbFolder().catch(fail); return;
     case 'dbPw': state.dbPwShown = !state.dbPwShown; renderDb(); return;
   }
@@ -1987,6 +2131,19 @@ document.addEventListener('input', e => {
 
 document.addEventListener('change', e => {
   const t = e.target as HTMLInputElement;
+  if (t.id === 'appLang' && (t.value === 'en' || t.value === 'id') && t.value !== lang) {
+    try { sessionStorage.setItem('wat.view', state.view); } catch { /* opens on the inbox */ }
+    setLang(t.value);
+    return;
+  }
+  if (t.dataset.numlang && (t.value === 'en' || t.value === 'id')) {
+    const a = acctById(t.dataset.numlang);
+    void api.setNumberLang(t.dataset.numlang, t.value).then(accts => {
+      state.accounts = accts; renderLangList();
+      toast((a?.name ?? 'Number') + ': Claude now writes in ' + (t.value === 'id' ? 'Bahasa Indonesia' : 'English'), 'ok');
+    }).catch(fail);
+    return;
+  }
   if (t.id === 'model') void api.saveSettings({ model: t.value as ModelId }).then(s => { state.settings = s; render(); toast(MODEL_LABEL[s.model] + ' selected'); });
   if (t.name === 'provider') {
     state.ai = { ...state.ai, provider: t.value as AiProvider, connected: false, testing: true };
@@ -2002,6 +2159,9 @@ document.addEventListener('change', e => {
     void api.saveSettings({ notifyPausedUntil: until }).then(s => { state.settings = s; renderSettings(); toast(until ? 'Notifications paused' : 'Notifications resumed', 'ok'); });
   }
   if (t.id === 'dbTools') void setDbTools(t.checked);
+  if (t.id === 'vcfFile') { void readVcf(t.files?.[0]); t.value = ''; }
+  if (t.id === 'ctCountry') void recountry(t.value.trim());
+  if (t.dataset.ctphone && state.ct) state.ct.keep[t.dataset.ctphone] = t.value;
   if (t.id === 'autoOn') void api.saveSettings({ autoOn: t.checked }).then(s => { state.settings = s; renderSettings(); toast(s.autoOn ? 'Auto summary on' : 'Auto summary off'); });
   if (['pinEveryMin', 'pinWindow', 'otherEveryMin', 'otherWindow'].includes(t.id)) void api.saveSettings({ [t.id]: Number(t.value) } as Partial<Settings>).then(s => { state.settings = s; renderSettings(); });
   if (t.id === 'aiImages') void api.saveSettings({ aiImages: t.checked }).then(s => { state.settings = s; toast(s.aiImages ? 'Claude will see photos in summaries' : 'Summaries now use text only'); });
@@ -2048,6 +2208,7 @@ api.on('accounts', accounts => {
   state.accounts = accounts;
   if (!state.acct && accounts.length) state.acct = accounts[0].id;
   render();
+  if (state.view === 'settings') renderLangList();
   if ($<HTMLDialogElement>('#dlgPair').open) renderPair();
 });
 api.on('chats-changed', () => {
@@ -2147,6 +2308,16 @@ async function bootDb(call: () => Promise<Awaited<ReturnType<Bridge['bootstrap']
 }
 
 (function init() {
+  startTranslating();
+  onThemeChange(() => { reportUi(); if (state.view === 'settings') renderAppearance(); });
+  reportUi();
+  document.documentElement.dataset.ready = '';
+  // A language switch reloads the window; come back to the tab it was switched from.
+  try {
+    const v = sessionStorage.getItem('wat.view');
+    sessionStorage.removeItem('wat.view');
+    if (v === 'settings' || v === 'loops' || v === 'reports') state.view = v;
+  } catch { /* start on the inbox */ }
   $$('.chip[data-filter]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.filter === state.filter)));
   render();
   void bootDb(() => api.bootstrap());
@@ -2159,3 +2330,17 @@ async function bootDb(call: () => Promise<Awaited<ReturnType<Bridge['bootstrap']
     $('#segLoops').hidden = over === 0;
   }, 60_000);
 })();
+
+// A .vcf dropped on the Contacts card opens the import.
+document.addEventListener('dragover', e => {
+  const drop = (e.target as HTMLElement).closest?.('#vcfDrop');
+  if (drop) { e.preventDefault(); drop.classList.add('over'); }
+});
+document.addEventListener('dragleave', e => { (e.target as HTMLElement).closest?.('#vcfDrop')?.classList.remove('over'); });
+document.addEventListener('drop', e => {
+  const drop = (e.target as HTMLElement).closest?.('#vcfDrop');
+  e.preventDefault();
+  if (!drop) return;
+  drop.classList.remove('over');
+  void readVcf(e.dataTransfer?.files[0]);
+});

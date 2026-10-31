@@ -14,9 +14,12 @@ import { claudeCodeStatus, forgetClaude } from '../ai/claude-code';
 import { summarizeChat } from '../ai/summarize';
 import { generateReport } from '../ai/report';
 import { autoSummary } from '../ai/auto';
+import { langDetect } from '../ai/language';
+import { applyUi } from '../ui';
 import { notifier } from '../notify/center';
 import type { WaManager } from '../wa/manager';
 import { cacheMedia, extOf, loadMedia } from '../media';
+import { applyContacts, guessCountry, previewContacts } from '../contacts/import';
 
 export function broadcast<K extends EventKey>(key: K, payload: Events[K]): void {
   for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send('evt', key, payload);
@@ -104,6 +107,12 @@ export function registerIpc(d: RouterDeps): void {
       tools: pgServer.tools(dbPassword()), toolsError: pgServer.toolsError };
   };
 
+  /** Names changed (contacts import): every chat list, SUM UP! card and open chat redraws with the new names. */
+  const namesChanged = async () => {
+    for (const a of await Q.listAccounts()) broadcast('chats-changed', { acct: a.id });
+    broadcast('loops-changed', await Q.listLoops());
+  };
+
   /** After the team changes: let replies from teammates settle open loops, then refresh the window. */
   const teamSettled = async () => {
     for (const chatId of await Q.chatsWithOpenLoops()) await resolveLoops(chatId).catch(() => false);
@@ -123,6 +132,10 @@ export function registerIpc(d: RouterDeps): void {
       if (!st.ok) throw new Error(st.error ?? "WA Turbo's database didn't restart.");
       return dbInfo();
     },
+    previewContacts: (data, fileName, countryCode) => previewContacts(new Uint8Array(data), fileName, countryCode),
+    applyContacts: async (token, keep) => { const r = await applyContacts(token, keep); await namesChanged(); return r; },
+    contactsInfo: async () => ({ ...(await Q.phonebookInfo()), countryCode: await guessCountry((await Q.getSettings()).contactsCountry) }),
+    clearContacts: async () => { const n = await Q.clearPhonebook(); await namesChanged(); return n; },
     showDbFolder: async () => { if (!externalDatabaseUrl()) await shell.openPath(pgHome()); },
 
     listChats: acct => Q.listChats(acct),
@@ -265,6 +278,18 @@ export function registerIpc(d: RouterDeps): void {
     cancelPairing: () => d.manager.cancelPairing(),
     reconnect: id => d.manager.reconnect(id),
     unlink: id => d.manager.unlink(id),
+    setNumberLang: async (id, lang) => {
+      if (lang === null) await Q.forgetAccountLang(id);
+      else await Q.setAccountLang(id, lang, false);
+      if (lang === null) langDetect.poke(true);
+      const accounts = await Q.listAccounts();
+      broadcast('accounts', accounts);
+      return accounts;
+    },
+    setUiPrefs: async p => {
+      applyUi(p);
+      await notifier.apply(await Q.getSettings());
+    },
 
     getSettings: () => Q.getSettings(),
     saveSettings: async patch => {
@@ -275,13 +300,19 @@ export function registerIpc(d: RouterDeps): void {
       return saved;
     },
     autoStatus: async () => autoSummary.status(),
-    checkAi: async () => { forgetClaude(); return aiStatus((await Q.getSettings()).provider); },
+    checkAi: async () => {
+      forgetClaude();
+      const st = await aiStatus((await Q.getSettings()).provider);
+      if (st.connected) langDetect.poke(true);
+      return st;
+    },
     testKey: async key => {
       try {
         const s = await Q.getSettings();
         await testKey(key.trim(), s.model);
         setApiKey(key.trim());
         resetClient();
+        langDetect.poke(true);
         return { ok: true, error: null };
       } catch (e) {
         return { ok: false, error: e instanceof Error ? e.message : String(e) };
