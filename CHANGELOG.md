@@ -4,6 +4,8 @@ User-visible changes to WA Turbo. The format follows [Keep a Changelog](https://
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-31
+
 ### Added
 - Windows 10/11 (x64) build: one-click installer with no admin prompt and the same built-in PostgreSQL (127.0.0.1 only, password-protected, data in %LOCALAPPDATA%). Windows notification sounds, a flashing taskbar button and unread badge, and a tray icon that reopens the window and quits. Title bar buttons follow the theme, and the wording says "this PC" in English and Indonesian.
 - Contacts: import your phone's contacts as a .vcf file (iPhone, Android, Google, iCloud). Chats and group members show the names you saved. When a number has more than one name, a dialog asks which one to keep. Removing the import puts the WhatsApp names back.
@@ -45,6 +47,7 @@ First macOS release, using a separately installed PostgreSQL (Docker or Postgres
 - Notifications by tier, menu bar count of pinned chats waiting on you, per-chat mute.
 - My team for group chats, and Claude usage per number.
 
-[Unreleased]: https://github.com/kevinfarel/WA-Turbo/compare/v0.2.0...development
+[Unreleased]: https://github.com/kevinfarel/WA-Turbo/compare/v0.3.0...development
+[0.3.0]: https://github.com/kevinfarel/WA-Turbo/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/kevinfarel/WA-Turbo/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/kevinfarel/WA-Turbo/releases/tag/v0.1.0
