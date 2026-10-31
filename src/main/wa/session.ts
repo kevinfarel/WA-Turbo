@@ -111,7 +111,7 @@ export class WaSession extends EventEmitter<SessionEvents> {
     const sock = makeWASocket({
       auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, logger) },
       logger,
-      browser: Browsers.macOS('WA Turbo'),
+      browser: process.platform === 'win32' ? Browsers.windows('WA Turbo') : Browsers.macOS('WA Turbo'),
       syncFullHistory: true,
       markOnlineOnConnect: false,
       shouldIgnoreJid: jid => skipChat(jid),

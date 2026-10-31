@@ -13,11 +13,13 @@ import { autoSummary } from './ai/auto';
 import { langDetect } from './ai/language';
 import { notifier } from './notify/center';
 import { WaManager } from './wa/manager';
-import { restoreTheme, windowBackground } from './ui';
+import { restoreTheme, titleBarOverlay, windowBackground } from './ui';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
 app.setName('WA Turbo');
+// Windows matches notifications and the taskbar button to the installer's shortcut by this id.
+if (process.platform === 'win32') app.setAppUserModelId('local.waturbo.app');
 // WA_TURBO_USER_DATA runs a second copy (dev, screenshots) beside the installed app without sharing its lock or config.
 if (process.env.WA_TURBO_USER_DATA) app.setPath('userData', process.env.WA_TURBO_USER_DATA);
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -98,13 +100,15 @@ function createWindow(): void {
   win = new BrowserWindow({
     width: 1440, height: 900, minWidth: 760, minHeight: 560,
     title: 'WA Turbo',
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 16, y: 16 },
+    // macOS: real traffic lights inset in the app's own title bar. Windows: its caption buttons drawn over the bar's right end.
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 16, y: 16 } }
+      : { titleBarStyle: 'hidden' as const, titleBarOverlay: titleBarOverlay(), autoHideMenuBar: true }),
     backgroundColor: windowBackground(),
     show: false,
     webPreferences: { preload: join(here, '../preload/index.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false },
   });
-  win.once('ready-to-show', () => win?.show());
+  win.once('ready-to-show', () => { win?.show(); void notifier.windowReady().catch(() => {}); });
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https:\/\//.test(url)) void shell.openExternal(url);
     return { action: 'deny' };
@@ -115,7 +119,13 @@ function createWindow(): void {
   win.on('closed', () => { win = null; });
 }
 
-app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
+// Opening WA Turbo again (Start menu, taskbar) brings the window back, also after it was closed to the tray.
+app.on('second-instance', () => {
+  if (!win) { createWindow(); return; }
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+});
 
 app.whenReady().then(async () => {
   restoreTheme();
@@ -170,8 +180,9 @@ app.whenReady().then(async () => {
   }
 });
 
-// Closing the window keeps WA Turbo running so every number keeps receiving.
-app.on('window-all-closed', () => { /* stay in the Dock */ });
+// Closing the window keeps WA Turbo running so every number keeps receiving: in the Dock on a Mac,
+// in the notification area on Windows. Without a tray icon (the database didn't start) Windows quits.
+app.on('window-all-closed', () => { if (process.platform !== 'darwin' && !notifier.hasTray()) app.quit(); });
 app.on('activate', () => { if (!win) createWindow(); });
 // Quitting waits for the built-in Postgres to shut down cleanly; a force quit leaves it running for the next launch to adopt.
 let quitting = false;

@@ -1,5 +1,6 @@
 import type { Lang } from '@shared/types';
 import { ID } from './i18n-id';
+import { platformDictionary } from './platform';
 
 // App language. The window is written in English; in Bahasa Indonesia every piece of interface text
 // is looked up in i18n-id.ts as it appears on screen (a MutationObserver sees each render), so the
@@ -35,7 +36,8 @@ const exact = new Map<string, string>();
 const patterns: { re: RegExp; out: string }[] = [];
 const PH = /\{(n\d?|x|y|z)\}/g;
 const HAS_PH = /\{(n\d?|x|y|z)\}/;
-for (const [en, id] of Object.entries(ID)) {
+// Windows wording (platform.ts) gets the same Indonesian as the Mac sentence it replaces.
+for (const [en, id] of Object.entries({ ...ID, ...platformDictionary(ID) })) {
   if (!HAS_PH.test(en)) { exact.set(norm(en), id); continue; }
   const src = norm(en).replace(/[.*+?^$()|[\]\\]/g, '\\$&').replace(/\\?\{(n\d?|x|y|z)\\?\}/g, (_m, k: string) => (k[0] === 'n' ? `(?<${k}>[\\d.,:+−-]+)` : `(?<${k}>.+?)`));
   patterns.push({ re: new RegExp('^' + src + '$'), out: id });

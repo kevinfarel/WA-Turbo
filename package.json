@@ -2,7 +2,7 @@
   "name": "wa-turbo",
   "productName": "WA Turbo",
   "version": "0.2.0",
-  "description": "Multi-account WhatsApp reader with Claude summaries, reports and reply-debt tracking. Runs locally on macOS.",
+  "description": "Multi-account WhatsApp reader with Claude summaries, reports and reply-debt tracking. Runs locally on macOS and Windows.",
   "private": true,
   "author": "Kevin Farel",
   "type": "module",
@@ -21,7 +21,9 @@
     "dist": "npm run lint:send && npm run postgres && npm run build && electron-builder --mac --arm64",
     "release:patch": "npm version patch -m \"Release v%s\"",
     "release:minor": "npm version minor -m \"Release v%s\"",
-    "release:major": "npm version major -m \"Release v%s\""
+    "release:major": "npm version major -m \"Release v%s\"",
+    "postgres:win": "node scripts/prepare-postgres-win.mjs",
+    "dist:win": "npm run lint:send && npm run postgres:win && npm run build && electron-builder --win --x64"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

@@ -5,13 +5,14 @@ import * as Q from '../db/queries';
 import type { IngestAlert, IngestResult } from '../ingest/upsert';
 import { BUNDLE_MS, STALE_MS, decide, overdueLoops, type Tier } from './decide';
 import { TRAY_ICON } from './tray-icon';
+import { BADGE_PX, badgeBitmap, toastXml, trayBitmap } from './win';
 import { uiLang } from '../ui';
 
 /** English or Bahasa Indonesia, following the app language. */
 const L = (en: string, id: string): string => (uiLang() === 'id' ? id : en);
 const msgs = (n: number): string => L(n + (n === 1 ? ' new message' : ' new messages'), n + ' pesan baru');
 
-// macOS notifications, the Dock badge and the menu bar icon. Read-only: it shows things and opens
+// Notifications, the Dock or taskbar badge and the menu bar or tray icon (macOS, and Windows through win.ts). Read-only: it shows things and opens
 // chats, and never sends anything to WhatsApp (scripts/check-send.mjs keeps main/notify off the send path).
 
 export interface NotifyHooks {
@@ -26,6 +27,7 @@ export interface NotifyHooks {
 /** More chats than this in one batch (the Mac woke up, a number reconnected) become one catch-up banner. */
 const CATCH_UP_CHATS = 4;
 const OVERDUE_EVERY_MS = 60_000;
+const WIN = process.platform === 'win32';
 
 interface Banner { n: Notification; at: number; count: number; firstMsg: string; tier: Exclude<Tier, 'none'> }
 
@@ -135,7 +137,7 @@ export class Notifier {
     }, () => this.hooks?.open(c.id, firstMsg), false);
     this.banners.set(c.id, { n, at: bundled ? prev!.at : now, count, firstMsg, tier });
     if (tier !== 'pinned') return;
-    if (!stale) app.dock?.bounce('critical');
+    if (!stale) this.attention();
     if (this.s.notifyRemindMin > 0 && !this.reminders.has(c.id)) {
       this.reminders.set(c.id, setTimeout(() => void this.remind(c.id).catch(() => {}), this.s.notifyRemindMin * 60_000));
     }
@@ -155,7 +157,7 @@ export class Notifier {
       silent: this.s.notifyPinnedSound === 'None', ...(this.s.notifyPinnedSound === 'None' ? {} : { sound: this.s.notifyPinnedSound }),
     }, () => this.hooks?.open(chatId, first), false);
     this.banners.set(chatId, { n, at: now, count: c.unread, firstMsg: first ?? '', tier: 'pinned' });
-    if (!this.inFront()) app.dock?.bounce('critical');
+    if (!this.inFront()) this.attention();
   }
 
   /** Re-checks pinned chats waiting too long for your reply: menu bar count, list, and one banner per newly overdue ask. */
@@ -201,19 +203,50 @@ export class Notifier {
     return Notification.isSupported();
   }
 
+  /** Windows keeps WA Turbo reachable through the tray once the window is closed. */
+  hasTray(): boolean {
+    return !!this.tray;
+  }
+
+  /** A new window has no taskbar badge yet on Windows. */
+  async windowReady(): Promise<void> {
+    if (this.hooks) await this.badge();
+  }
+
+  /** Pinned chats: a Dock bounce on macOS, a flashing taskbar button on Windows (it stops once you switch to WA Turbo). */
+  private attention(): void {
+    if (WIN) this.hooks?.window()?.flashFrame(true);
+    else app.dock?.bounce('critical');
+  }
+
   private async badge(): Promise<void> {
     const t = await Q.unreadTotals();
     const n = this.s.notifyBadge === 'chats' ? t.chats : this.s.notifyBadge === 'messages' ? t.messages : this.s.notifyBadge === 'pinned' ? t.pinned : 0;
-    app.setBadgeCount(n);
+    if (!WIN) { app.setBadgeCount(n); return; }
+    const w = this.hooks?.window();
+    if (!w || w.isDestroyed()) return;
+    const img = n ? nativeImage.createFromBitmap(badgeBitmap(n), { width: BADGE_PX, height: BADGE_PX, scaleFactor: 2 }) : null;
+    w.setOverlayIcon(img, n ? n + ' unread' : '');
   }
 
   private renderTray(): void {
-    if (!this.s.menuBar) { this.tray?.destroy(); this.tray = null; return; }
-    const n = this.overdue.length;
-    const img = nativeImage.createFromBuffer(Buffer.from(n ? TRAY_ICON.alert : TRAY_ICON.normal, 'base64'), { scaleFactor: 2 });
-    img.setTemplateImage(true);
-    if (!this.tray) { this.tray = new Tray(img); this.tray.setToolTip('WA Turbo'); } else this.tray.setImage(img);
-    this.tray.setTitle(n ? String(n) : '', { fontType: 'monospacedDigit' });
+    // On Windows the tray icon stays even with the count switched off: it is how you get back to a closed window and quit.
+    if (!this.s.menuBar && !WIN) { this.tray?.destroy(); this.tray = null; return; }
+    const n = this.s.menuBar ? this.overdue.length : 0;
+    const tpl = nativeImage.createFromBuffer(Buffer.from(n ? TRAY_ICON.alert : TRAY_ICON.normal, 'base64'), { scaleFactor: 2 });
+    let img = tpl;
+    if (WIN) {
+      const px = tpl.toBitmap({ scaleFactor: 2 });
+      const width = Math.sqrt(px.length / 4); // the templates are square
+      img = nativeImage.createFromBitmap(trayBitmap(px, width, n > 0), { width, height: width, scaleFactor: 2 });
+    } else img.setTemplateImage(true);
+    if (!this.tray) {
+      this.tray = new Tray(img);
+      // Windows: a left click opens WA Turbo, the right click shows the menu.
+      if (WIN) this.tray.on('click', () => this.hooks?.open(null, null));
+    } else this.tray.setImage(img);
+    if (WIN) this.tray.setToolTip(n ? 'WA Turbo · ' + L(n + (n === 1 ? ' pinned chat waits on your reply' : ' pinned chats wait on your reply'), n + ' chat disematkan menunggu balasan Anda') : 'WA Turbo');
+    else { this.tray.setToolTip('WA Turbo'); this.tray.setTitle(n ? String(n) : '', { fontType: 'monospacedDigit' }); }
     const now = Date.now();
     const paused = this.s.notifyPausedUntil > now;
     const items: MenuItemConstructorOptions[] = [
@@ -246,7 +279,8 @@ export class Notifier {
 
   /** Shows one notification and keeps a reference until it is clicked or closed (click handlers need the object alive). */
   private post(o: Electron.NotificationConstructorOptions, onClick: () => void, track = true): Notification {
-    const n = new Notification(o);
+    // Windows ignores `sound` and `subtitle`; the toast XML carries both.
+    const n = new Notification(WIN ? { ...o, toastXml: toastXml({ ...o, sound: o.sound }) } : o);
     n.on('click', onClick);
     if (track) {
       this.extra.add(n);
