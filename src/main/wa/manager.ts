@@ -4,6 +4,7 @@ import type { WAMessageKey } from 'baileys';
 import type { Account, Accent, PairState } from '@shared/types';
 import { authClear, createAccount, deleteAccount, listAccounts, updateAccount } from '../db/queries';
 import type { IngestResult } from '../ingest/upsert';
+import { HERE } from '../config';
 import { WaSession } from './session';
 
 export interface ManagerEvents {
@@ -38,21 +39,21 @@ export class WaManager extends EventEmitter<ManagerEvents> {
   /** A message the person typed and sent from the chat window. */
   async send(accountId: string, chatJid: string, body: { text: string; image?: { buf: Buffer; mime: string } }): Promise<string> {
     const s = this.sessions.get(accountId);
-    if (!s) throw new Error('This number is not linked on this Mac.');
+    if (!s) throw new Error('This number is not linked on ' + HERE + '.');
     return s.send(chatJid, body);
   }
 
   /** An edit of your own message, made from the chat window. */
   async edit(accountId: string, chatJid: string, key: WAMessageKey, text: string): Promise<void> {
     const s = this.sessions.get(accountId);
-    if (!s) throw new Error('This number is not linked on this Mac.');
+    if (!s) throw new Error('This number is not linked on ' + HERE + '.');
     await s.edit(chatJid, key, text);
   }
 
   /** Delete for everyone of your own message, confirmed in the chat window. */
   async revoke(accountId: string, chatJid: string, key: WAMessageKey): Promise<void> {
     const s = this.sessions.get(accountId);
-    if (!s) throw new Error('This number is not linked on this Mac.');
+    if (!s) throw new Error('This number is not linked on ' + HERE + '.');
     await s.revoke(chatJid, key);
   }
 

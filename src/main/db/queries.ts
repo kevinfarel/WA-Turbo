@@ -1,6 +1,6 @@
 import type pg from 'pg';
 import type {
-  Account, Accent, AccountStatus, ChatInsight, ChatKind, ChatSummaryRow, Loop, LoopDir, LoopKind, LoopSource, LoopState,
+  Account, Accent, AccountStatus, ChatInsight, Lang, ChatKind, ChatSummaryRow, Loop, LoopDir, LoopKind, LoopSource, LoopState,
   Message, MessageType, ModelId, Partner, PresetId, Report, Settings, SummaryResult, TeamMember, UsageBucket,
 } from '@shared/types';
 import { DEFAULT_SLA_H } from '@shared/sla';
@@ -8,8 +8,10 @@ import { q, q1, tx } from './client';
 
 /* ---------------- accounts ---------------- */
 
-interface AccountRow { id: string; name: string; description: string; phone: string; accent: Accent; status: AccountStatus; paired_at: number | null; jid: string | null }
-const toAccount = (r: AccountRow): Account => ({ id: r.id, name: r.name, desc: r.description, phone: r.phone, accent: r.accent, status: r.status, pairedAt: r.paired_at });
+interface AccountRow { id: string; name: string; description: string; phone: string; accent: Accent; status: AccountStatus; paired_at: number | null; jid: string | null; ai_lang: Lang | null; ai_lang_detected: boolean }
+const toAccount = (r: AccountRow): Account => ({
+  id: r.id, name: r.name, desc: r.description, phone: r.phone, accent: r.accent, status: r.status, pairedAt: r.paired_at, lang: r.ai_lang, langDetected: r.ai_lang_detected,
+});
 
 export async function listAccounts(): Promise<Account[]> {
   return (await q<AccountRow>('SELECT * FROM accounts ORDER BY created_at')).map(toAccount);
@@ -30,6 +32,35 @@ export async function updateAccount(id: string, p: { status?: AccountStatus; pho
        paired_at = CASE WHEN $5 THEN now() ELSE paired_at END WHERE id = $1`,
     [id, p.status ?? null, p.phone ?? null, p.jid ?? null, p.pairedNow ?? false],
   );
+}
+
+/** Sets the language Claude writes in for a number. detected = chosen by WA Turbo from the chats, not by you. */
+export async function setAccountLang(id: string, lang: Lang, detected: boolean): Promise<void> {
+  await q('UPDATE accounts SET ai_lang = $2, ai_lang_detected = $3 WHERE id = $1', [id, lang, detected]);
+}
+
+export async function forgetAccountLang(id: string): Promise<void> {
+  await q('UPDATE accounts SET ai_lang = NULL, ai_lang_detected = false WHERE id = $1', [id]);
+}
+
+/** The language for the number a chat belongs to; English until one is set. */
+export async function langOfChat(chatId: string): Promise<Lang> {
+  const r = await q1<{ ai_lang: Lang | null }>('SELECT a.ai_lang FROM chats c JOIN accounts a ON a.id = c.account_id WHERE c.id = $1', [chatId]);
+  return r?.ai_lang ?? 'en';
+}
+
+/** Numbers with no language yet, and a sample to detect one from: the newest text of their 10 most recent chats. */
+export async function langSamples(): Promise<{ id: string; chats: number; pairedAt: number | null; lines: string[] }[]> {
+  const accts = await q<{ id: string; paired_at: number | null }>("SELECT id, paired_at FROM accounts WHERE ai_lang IS NULL AND status <> 'pairing'");
+  const out = [];
+  for (const a of accts) {
+    const rows = await q<{ chat_id: string; text: string }>(
+      `SELECT x.chat_id, x.text FROM (SELECT id FROM chats WHERE account_id = $1 AND last_message_at IS NOT NULL ORDER BY last_message_at DESC LIMIT 10) c
+         CROSS JOIN LATERAL (SELECT m.chat_id, m.text FROM messages m WHERE m.chat_id = c.id AND m.type = 'text' AND NOT m.deleted AND length(m.text) > 1
+                             ORDER BY m.sent_at DESC LIMIT 8) x`, [a.id]);
+    out.push({ id: a.id, chats: new Set(rows.map(r => r.chat_id)).size, pairedAt: a.paired_at, lines: rows.map(r => r.text.slice(0, 200)) });
+  }
+  return out;
 }
 
 export async function deleteAccount(id: string): Promise<void> {
@@ -100,8 +131,12 @@ export async function chatMeta(chatId: string): Promise<{ id: string; account_id
   return q1('SELECT id, account_id, jid, kind, name, partner_id FROM chats WHERE id = $1', [chatId]);
 }
 
+/** Display names: your contact name (imported .vcf, else the name saved on the number's phone), else what WhatsApp sent. */
+const DM_NAME = `CASE WHEN c.kind = 'dm' THEN coalesce(contact_name(c.account_id, c.jid), nullif(c.name, '')) ELSE c.name END`;
+const SENDER_NAME = `CASE WHEN from_me THEN sender_name ELSE coalesce(contact_name(account_id, sender_jid), sender_name) END AS sender_name`;
+
 const CHAT_ROW_SQL = `
-  SELECT c.id, c.account_id, c.name, c.subtitle, c.kind, c.unread, c.partner_id, c.service, c.stage, c.summarized_at, c.jid,
+  SELECT c.id, c.account_id, ${DM_NAME} AS name, c.subtitle, c.kind, c.unread, c.partner_id, c.service, c.stage, c.summarized_at, c.jid,
          coalesce(c.last_message_at, c.created_at) AS last_at, c.pinned_at, c.auto_checked_at, c.notify_muted_until,
          lm.from_me, lm.sender_name, lm.text, lm.type,
          (SELECT count(*) FROM messages m WHERE m.chat_id = c.id AND NOT m.deleted) AS msg_count,
@@ -109,7 +144,7 @@ const CHAT_ROW_SQL = `
          CASE WHEN ls.created_at IS NULL THEN 0 ELSE (SELECT count(*) FROM messages m WHERE m.chat_id = c.id AND NOT m.deleted AND m.type <> 'system'
            AND m.id > coalesce(ls.last_message_id, 0)) END AS new_since
   FROM chats c
-  LEFT JOIN LATERAL (SELECT from_me, sender_name, text, type FROM messages m WHERE m.chat_id = c.id AND NOT m.deleted
+  LEFT JOIN LATERAL (SELECT from_me, CASE WHEN from_me THEN sender_name ELSE coalesce(contact_name(account_id, sender_jid), sender_name) END AS sender_name, text, type FROM messages m WHERE m.chat_id = c.id AND NOT m.deleted
                      ORDER BY sent_at DESC LIMIT 1) lm ON true
   LEFT JOIN LATERAL (SELECT created_at, auto, last_message_id FROM summaries s WHERE s.chat_id = c.id
                      ORDER BY created_at DESC LIMIT 1) ls ON true`;
@@ -152,7 +187,8 @@ export async function teamJids(): Promise<Set<string>> {
 
 export async function listTeam(): Promise<TeamMember[]> {
   const rows = await q<{ id: number; name: string; jids: string[]; created_at: number }>(
-    `SELECT tm.id, tm.name, array_agg(tj.jid ORDER BY tj.jid) AS jids, tm.created_at
+    `SELECT tm.id, coalesce((SELECT n FROM (SELECT contact_name(NULL, x.jid) AS n FROM team_jids x WHERE x.member_id = tm.id) k WHERE n IS NOT NULL LIMIT 1), tm.name) AS name,
+            array_agg(tj.jid ORDER BY tj.jid) AS jids, tm.created_at
        FROM team_members tm JOIN team_jids tj ON tj.member_id = tm.id GROUP BY tm.id ORDER BY lower(tm.name), tm.id`);
   return rows.map(r => ({ id: String(r.id), name: r.name, phones: r.jids.filter(j => j.endsWith('@s.whatsapp.net')).map(j => '+' + j.split('@')[0]), addedAt: r.created_at }));
 }
@@ -239,7 +275,7 @@ export async function fixSenders(list: { id: number; jid: string; name: string |
 /** Sender of one stored message, for "Mark as my team". */
 export async function messageSender(id: string): Promise<{ jid: string | null; name: string | null; fromMe: boolean; kind: ChatKind; accountId: string } | null> {
   const r = await q1<{ sender_jid: string | null; sender_name: string | null; from_me: boolean; kind: ChatKind; account_id: string }>(
-    'SELECT m.sender_jid, m.sender_name, m.from_me, c.kind, c.account_id FROM messages m JOIN chats c ON c.id = m.chat_id WHERE m.id = $1', [Number(id)]);
+    'SELECT m.sender_jid, coalesce(contact_name(m.account_id, m.sender_jid), m.sender_name) AS sender_name, m.from_me, c.kind, c.account_id FROM messages m JOIN chats c ON c.id = m.chat_id WHERE m.id = $1', [Number(id)]);
   return r ? { jid: r.sender_jid, name: r.sender_name, fromMe: r.from_me, kind: r.kind, accountId: r.account_id } : null;
 }
 
@@ -257,7 +293,7 @@ export interface NotifyChat { id: string; name: string; kind: ChatKind; pinned: 
 export async function notifyChats(ids: string[] | null): Promise<NotifyChat[]> {
   if (ids && !ids.length) return [];
   const rows = await q<{ id: string; name: string; jid: string; kind: ChatKind; pinned: boolean; notify_muted_until: number | null; acct: string; account_id: string; unread: number }>(
-    `SELECT c.id, c.name, c.jid, c.kind, c.pinned_at IS NOT NULL AS pinned, c.notify_muted_until, a.name AS acct, c.account_id, c.unread
+    `SELECT c.id, ${DM_NAME} AS name, c.jid, c.kind, c.pinned_at IS NOT NULL AS pinned, c.notify_muted_until, a.name AS acct, c.account_id, c.unread
      FROM chats c JOIN accounts a ON a.id = c.account_id WHERE ${ids ? 'c.id = ANY($1)' : 'c.pinned_at IS NOT NULL'}`, ids ? [ids] : []);
   return rows.map(r => ({ id: r.id, name: r.name || r.jid.split('@')[0], kind: r.kind, pinned: r.pinned, mutedUntil: r.notify_muted_until, acct: r.acct, acctId: r.account_id, unread: r.unread }));
 }
@@ -312,7 +348,7 @@ export async function searchChats(acct: string, query: string): Promise<string[]
   const tsq = words.map(w => w + ':*').join(' & ');
   const like = '%' + query.trim().replace(/[%_\\]/g, m => '\\' + m) + '%';
   const rows = await q<{ id: string }>(
-    `SELECT c.id FROM chats c WHERE c.account_id = $1 AND (c.name ILIKE $3 OR c.subtitle ILIKE $3
+    `SELECT c.id FROM chats c WHERE c.account_id = $1 AND (c.name ILIKE $3 OR c.subtitle ILIKE $3 OR (c.kind = 'dm' AND contact_name(c.account_id, c.jid) ILIKE $3)
        OR EXISTS (SELECT 1 FROM messages m WHERE m.chat_id = c.id AND m.tsv @@ to_tsquery('simple', $2)))`, [acct, tsq, like]);
   return rows.map(r => r.id);
 }
@@ -415,14 +451,14 @@ export async function dismissLoopsOn(messageId: string): Promise<number> {
 
 export async function getMessages(chatId: string, limit: number): Promise<Message[]> {
   const rows = await q<MessageRow>(
-    `SELECT * FROM (SELECT id, chat_id, from_me, sender_name, sender_jid, sent_at, type, text, media, edited, EXISTS (SELECT 1 FROM team_jids t JOIN chats tc ON tc.id = messages.chat_id AND tc.kind = 'group' WHERE t.jid = messages.sender_jid) AS team FROM messages
+    `SELECT * FROM (SELECT id, chat_id, from_me, ${SENDER_NAME}, sender_jid, sent_at, type, text, media, edited, EXISTS (SELECT 1 FROM team_jids t JOIN chats tc ON tc.id = messages.chat_id AND tc.kind = 'group' WHERE t.jid = messages.sender_jid) AS team FROM messages
        WHERE chat_id = $1 AND NOT deleted ORDER BY sent_at DESC, id DESC LIMIT $2) t ORDER BY sent_at, id`, [chatId, limit]);
   return rows.map(toMessage);
 }
 
 export async function messagesSince(chatId: string, since: number): Promise<Message[]> {
   const rows = await q<MessageRow>(
-    `SELECT id, chat_id, from_me, sender_name, sender_jid, sent_at, type, text, media, edited, EXISTS (SELECT 1 FROM team_jids t JOIN chats tc ON tc.id = messages.chat_id AND tc.kind = 'group' WHERE t.jid = messages.sender_jid) AS team FROM messages
+    `SELECT id, chat_id, from_me, ${SENDER_NAME}, sender_jid, sent_at, type, text, media, edited, EXISTS (SELECT 1 FROM team_jids t JOIN chats tc ON tc.id = messages.chat_id AND tc.kind = 'group' WHERE t.jid = messages.sender_jid) AS team FROM messages
      WHERE chat_id = $1 AND NOT deleted AND sent_at >= to_timestamp($2 / 1000.0) ORDER BY sent_at, id`, [chatId, since]);
   return rows.map(toMessage);
 }
@@ -430,7 +466,7 @@ export async function messagesSince(chatId: string, since: number): Promise<Mess
 /** Messages since `since`, at most the newest `cap`; `skipped` counts the older ones left out. */
 export async function messagesSinceCapped(chatId: string, since: number, cap: number): Promise<{ messages: Message[]; skipped: number }> {
   const rows = await q<MessageRow & { total: number }>(
-    `SELECT * FROM (SELECT id, chat_id, from_me, sender_name, sender_jid, sent_at, type, text, media, edited, EXISTS (SELECT 1 FROM team_jids t JOIN chats tc ON tc.id = messages.chat_id AND tc.kind = 'group' WHERE t.jid = messages.sender_jid) AS team, count(*) OVER () AS total FROM messages
+    `SELECT * FROM (SELECT id, chat_id, from_me, ${SENDER_NAME}, sender_jid, sent_at, type, text, media, edited, EXISTS (SELECT 1 FROM team_jids t JOIN chats tc ON tc.id = messages.chat_id AND tc.kind = 'group' WHERE t.jid = messages.sender_jid) AS team, count(*) OVER () AS total FROM messages
        WHERE chat_id = $1 AND NOT deleted AND sent_at >= to_timestamp($2 / 1000.0) ORDER BY sent_at DESC, id DESC LIMIT $3) t ORDER BY sent_at, id`,
     [chatId, since, cap]);
   return { messages: rows.map(toMessage), skipped: rows.length ? Number(rows[0].total) - rows.length : 0 };
@@ -438,7 +474,7 @@ export async function messagesSinceCapped(chatId: string, since: number, cap: nu
 
 export async function messagesByIds(ids: number[]): Promise<Message[]> {
   if (!ids.length) return [];
-  const rows = await q<MessageRow>(`SELECT id, chat_id, from_me, sender_name, sender_jid, sent_at, type, text, media, edited, EXISTS (SELECT 1 FROM team_jids t JOIN chats tc ON tc.id = messages.chat_id AND tc.kind = 'group' WHERE t.jid = messages.sender_jid) AS team FROM messages WHERE id = ANY($1) ORDER BY sent_at, id`, [ids]);
+  const rows = await q<MessageRow>(`SELECT id, chat_id, from_me, ${SENDER_NAME}, sender_jid, sent_at, type, text, media, edited, EXISTS (SELECT 1 FROM team_jids t JOIN chats tc ON tc.id = messages.chat_id AND tc.kind = 'group' WHERE t.jid = messages.sender_jid) AS team FROM messages WHERE id = ANY($1) ORDER BY sent_at, id`, [ids]);
   return rows.map(toMessage);
 }
 
@@ -477,19 +513,21 @@ export async function listPartners(): Promise<Partner[]> {
 
 interface LoopRow {
   id: number; chat_id: string; message_id: number | null; dir: LoopDir; kind: LoopKind; state: LoopState; source: LoopSource; topic: string;
-  asked_by: string; asked_at: number; sla_hours: number; blocks: string | null; snooze_note: string | null; answered_at: number | null;
+  asked_by: string; asked_name: string | null; asked_at: number; sla_hours: number; blocks: string | null; snooze_note: string | null; answered_at: number | null;
   ai_hint: string | null; close_note: string | null; nudges: number[] | null; chases: number;
 }
 
 const toLoop = (r: LoopRow): Loop => ({
   id: String(r.id), chatId: r.chat_id, msgId: r.message_id === null ? null : String(r.message_id), dir: r.dir, kind: r.kind, state: r.state,
-  source: r.source, topic: r.topic, askedBy: r.asked_by, askedAt: r.asked_at, slaH: r.sla_hours, blocks: r.blocks, snoozeNote: r.snooze_note,
+  source: r.source, topic: r.topic, askedBy: r.asked_name ? r.asked_name + (/ \([^()]*\)$/.exec(r.asked_by)?.[0] ?? '') : r.asked_by, askedAt: r.asked_at, slaH: r.sla_hours, blocks: r.blocks, snoozeNote: r.snooze_note,
   answeredAt: r.answered_at, nudges: (r.nudges ?? []).map(n => Number(n)).sort((a, b) => b - a),
   chases: Number(r.chases), aiHint: r.ai_hint, closeNote: r.close_note,
 });
 
+// asked_name: the asker's contact name now, so imported names reach SUM UP! cards (asked_by keeps its "(Team)" or partner suffix).
 const LOOP_SQL = `
-  SELECT l.*, (SELECT array_agg((extract(epoch FROM n.at) * 1000)::bigint) FROM loop_nudges n WHERE n.loop_id = l.id AND n.by_me) AS nudges,
+  SELECT l.*, (SELECT CASE WHEN m.from_me THEN NULL ELSE contact_name(c.account_id, coalesce(m.sender_jid, CASE WHEN c.kind = 'dm' THEN c.jid END)) END
+                 FROM messages m JOIN chats c ON c.id = m.chat_id WHERE m.id = l.message_id) AS asked_name, (SELECT array_agg((extract(epoch FROM n.at) * 1000)::bigint) FROM loop_nudges n WHERE n.loop_id = l.id AND n.by_me) AS nudges,
          (SELECT count(*) FROM loop_nudges n WHERE n.loop_id = l.id AND NOT n.by_me) AS chases
   FROM loops l`;
 
@@ -590,7 +628,7 @@ export const DEFAULT_SETTINGS: Settings = {
   provider: 'claude-code', model: 'claude-haiku-5-5', window: 'week', customPrompt: '', openAtLogin: false, aiImages: true,
   autoOn: true, pinEveryMin: 5, pinWindow: 10, otherEveryMin: 60, otherWindow: 2,
   notifyOn: true, notifyPinnedSound: 'Glass', notifyRemindMin: 10, notifyOthers: 'direct', notifyOtherSound: 'Tink', notifyPreview: true,
-  notifyBadge: 'chats', notifyOverdue: true, menuBar: true, notifyPausedUntil: 0,
+  notifyBadge: 'chats', notifyOverdue: true, menuBar: true, notifyPausedUntil: 0, contactsCountry: '',
 };
 
 export async function getSettings(): Promise<Settings> {
@@ -611,20 +649,20 @@ export async function saveSettings(patch: Partial<Settings>): Promise<Settings> 
 /* ---------------- summaries, reports, aliases, usage ---------------- */
 
 export async function saveSummary(s: SummaryResult, windowSize: number, lastMsgId: number | null, rev: number | null = null): Promise<void> {
-  await q('INSERT INTO summaries (chat_id, model, window_size, last_message_id, msg_count, result, chat_rev, window_key, auto) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
-    [s.chatId, s.model, windowSize, lastMsgId, s.msgCount, JSON.stringify(s.insight), rev, s.windowKey, s.auto]);
+  await q('INSERT INTO summaries (chat_id, model, window_size, last_message_id, msg_count, result, chat_rev, window_key, auto, lang) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
+    [s.chatId, s.model, windowSize, lastMsgId, s.msgCount, JSON.stringify(s.insight), rev, s.windowKey, s.auto, s.lang ?? 'en']);
 }
 
-type SummaryRow = { chat_id: string; model: ModelId; created_at: number; msg_count: number; result: ChatInsight; last_message_id: number | null; window_size: number; window_key: string | null; auto: boolean };
+type SummaryRow = { chat_id: string; model: ModelId; created_at: number; msg_count: number; result: ChatInsight; last_message_id: number | null; window_size: number; window_key: string | null; auto: boolean; lang: Lang };
 const toSummary = (r: SummaryRow) => ({
   chatId: r.chat_id, model: r.model, createdAt: r.created_at, msgCount: r.msg_count, insight: r.result, lastMessageId: r.last_message_id,
-  windowSize: r.window_size, windowKey: r.window_key, auto: r.auto,
+  windowSize: r.window_size, windowKey: r.window_key, auto: r.auto, lang: r.lang,
 });
 
-/** The cache: a summary of exactly this chat revision, read with this model and window. */
-export async function cachedSummary(chatId: string, model: ModelId, windowKey: string, rev: number): Promise<SummaryResult | null> {
-  const r = await q1<SummaryRow>('SELECT * FROM summaries WHERE chat_id = $1 AND model = $2 AND window_key = $3 AND chat_rev = $4 ORDER BY created_at DESC LIMIT 1',
-    [chatId, model, windowKey, rev]);
+/** The cache: a summary of exactly this chat revision, read with this model and window, in this language. */
+export async function cachedSummary(chatId: string, model: ModelId, windowKey: string, rev: number, lang: Lang): Promise<SummaryResult | null> {
+  const r = await q1<SummaryRow>('SELECT * FROM summaries WHERE chat_id = $1 AND model = $2 AND window_key = $3 AND chat_rev = $4 AND lang = $5 ORDER BY created_at DESC LIMIT 1',
+    [chatId, model, windowKey, rev, lang]);
   return r ? toSummary(r) : null;
 }
 
@@ -678,4 +716,56 @@ export async function usageSince(since: number): Promise<UsageBucket[]> {
             sum(coalesce(cache_read_tokens, 0)) AS cache_read, sum(coalesce(cache_write_tokens, 0)) AS cache_write, count(*) AS runs
        FROM ai_runs WHERE created_at >= to_timestamp($1 / 1000.0) GROUP BY 1, 2 ORDER BY 1`, [since]);
   return rows.map(r => ({ hour: r.hour, acct: r.acct, input: Number(r.input), output: Number(r.output), cacheRead: Number(r.cache_read), cacheWrite: Number(r.cache_write), runs: Number(r.runs) }));
+}
+
+/* ---------------- phone contacts (.vcf import) ---------------- */
+
+const toMap = (rows: { phone: string; name: string }[]): Map<string, string> => new Map(rows.map(r => [r.phone, r.name]));
+
+/** Names from earlier imports for these numbers. */
+export async function phonebookNames(phones: string[]): Promise<Map<string, string>> {
+  return toMap(await q('SELECT phone, name FROM phonebook WHERE phone = ANY($1)', [phones]));
+}
+
+/** Names saved on the phone that owns each linked number, as WhatsApp synced them. */
+export async function syncedNames(phones: string[]): Promise<Map<string, string>> {
+  return toMap(await q(
+    `SELECT DISTINCT ON (phone) phone, name FROM (
+       SELECT coalesce(CASE WHEN jid LIKE '%@s.whatsapp.net' THEN split_part(jid, '@', 1) END, regexp_replace(phone, '\\D', '', 'g')) AS phone, name
+         FROM contacts WHERE coalesce(name, '') <> '') x
+     WHERE phone = ANY($1) ORDER BY phone, name`, [phones]));
+}
+
+/** What each direct chat with these numbers is called right now. */
+export async function dmChatNames(phones: string[]): Promise<Map<string, string>> {
+  return toMap(await q(
+    `SELECT split_part(c.jid, '@', 1) AS phone, coalesce(${DM_NAME}, split_part(c.jid, '@', 1)) AS name
+       FROM chats c WHERE c.kind = 'dm' AND c.jid LIKE '%@s.whatsapp.net' AND split_part(c.jid, '@', 1) = ANY($1)`, [phones]));
+}
+
+/** Every direct chat's shown name, to count how many an import renamed. */
+export async function dmDisplayNames(): Promise<Map<string, string>> {
+  const rows = await q<{ id: string; name: string }>(`SELECT c.id, coalesce(${DM_NAME}, c.jid) AS name FROM chats c WHERE c.kind = 'dm'`);
+  return new Map(rows.map(r => [r.id, r.name]));
+}
+
+export async function savePhonebook(rows: { phone: string; name: string }[], remove: string[]): Promise<void> {
+  await tx(async c => {
+    for (let i = 0; i < rows.length; i += 2000) {
+      const part = rows.slice(i, i + 2000);
+      await c.query(
+        `INSERT INTO phonebook (phone, name) SELECT * FROM unnest($1::text[], $2::text[])
+         ON CONFLICT (phone) DO UPDATE SET name = excluded.name, updated_at = now()`, [part.map(r => r.phone), part.map(r => r.name)]);
+    }
+    if (remove.length) await c.query('DELETE FROM phonebook WHERE phone = ANY($1)', [remove]);
+  });
+}
+
+export async function phonebookInfo(): Promise<{ count: number; updatedAt: number | null }> {
+  const r = await q1<{ count: number; updated_at: number | null }>('SELECT count(*)::int AS count, max(updated_at) AS updated_at FROM phonebook');
+  return { count: r?.count ?? 0, updatedAt: r?.updated_at ?? null };
+}
+
+export async function clearPhonebook(): Promise<number> {
+  return (await q<{ phone: string }>('DELETE FROM phonebook RETURNING phone')).length;
 }

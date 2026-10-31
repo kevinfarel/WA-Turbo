@@ -1,4 +1,4 @@
-import type { Loop } from './types';
+import type { Lang, Loop } from './types';
 
 // SLA math, ported from the mockup's loopAge / loopPending / loopSla / fmtDur.
 // Difference from the mockup (confirmed 28 Oct): only your own nudges restart the clock;
@@ -33,13 +33,18 @@ export function loopSla(l: Loop, now: number): SlaState {
   return 'ok';
 }
 
-export function fmtDur(h: number): string {
-  if (h < 1) return Math.max(1, Math.round(h * 60)) + 'm';
-  if (h < 24) return Math.round(h) + 'h';
-  const d = Math.floor(h / 24);
+let durLang: Lang = 'en';
+/** The language fmtDur writes in by default: the app language (set once at start in each process). */
+export const setDurLang = (l: Lang): void => { durLang = l; };
+
+export function fmtDur(h: number, lang: Lang = durLang): string {
+  const [m, hr, d] = lang === 'id' ? [' mnt', ' jam', ' hari'] : ['m', 'h', 'd'];
+  if (h < 1) return Math.max(1, Math.round(h * 60)) + m;
+  if (h < 24) return Math.round(h) + hr;
+  const days = Math.floor(h / 24);
   const r = Math.round(h % 24);
-  if (r === 24) return d + 1 + 'd';
-  return d + 'd' + (r ? ' ' + r + 'h' : '');
+  if (r === 24) return days + 1 + d;
+  return days + d + (r ? ' ' + r + hr : '');
 }
 
 export const DEFAULT_SLA_H = { owed: 24, waiting: 48 } as const;

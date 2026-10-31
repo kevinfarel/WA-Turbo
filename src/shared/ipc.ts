@@ -1,6 +1,6 @@
 import type {
   Account, Accent, AiStatus, AutoStatus, Bootstrap, ChatSummaryRow, Loop, LoopDir, Message, PairState, Partner, PresetId,
-  DbInfo, Report, RunProgress, Settings, SummaryResult, SummaryWindow, TeamMember, UsageBucket,
+  ContactImportPreview, ContactImportResult, ContactsInfo, DbInfo, Lang, UiPrefs, Report, RunProgress, Settings, SummaryResult, SummaryWindow, TeamMember, UsageBucket,
 } from './types';
 
 // Every call the window can make. The main process registers one handler per key (ipc/router.ts),
@@ -13,6 +13,14 @@ export interface Api {
   /** Lets DBeaver and similar tools on this Mac connect over 127.0.0.1. Restarts the database for a moment. */
   setDbTools(on: boolean): Promise<DbInfo>;
   showDbFolder(): Promise<void>;
+
+  /** Reads a .vcf file and reports what importing it would change, including numbers with more than one name. */
+  previewContacts(data: Uint8Array, fileName: string, countryCode: string | null): Promise<ContactImportPreview>;
+  /** Saves the previewed contacts; `keep` maps each duplicate number to the name the person picked. */
+  applyContacts(token: string, keep: Record<string, string>): Promise<ContactImportResult>;
+  contactsInfo(): Promise<ContactsInfo>;
+  /** Forgets every imported name; chats go back to the names WhatsApp has. */
+  clearContacts(): Promise<number>;
 
   listChats(acct: string): Promise<ChatSummaryRow[]>;
   listAllChats(): Promise<ChatSummaryRow[]>;
@@ -52,6 +60,10 @@ export interface Api {
   cancelPairing(): Promise<void>;
   reconnect(accountId: string): Promise<void>;
   unlink(accountId: string): Promise<void>;
+  /** The language Claude writes in for a number. Null forgets it, so it is detected again from the chats. */
+  setNumberLang(accountId: string, lang: Lang | null): Promise<Account[]>;
+  /** App language and theme, so notifications, the menu bar and the window background match. */
+  setUiPrefs(p: UiPrefs): Promise<void>;
 
   getSettings(): Promise<Settings>;
   saveSettings(patch: Partial<Settings>): Promise<Settings>;
@@ -102,10 +114,10 @@ export type ApiKey = keyof Api;
 export type EventKey = keyof Events;
 
 export const API_KEYS: ApiKey[] = [
-  'bootstrap', 'retryDb', 'dbInfo', 'setDbTools', 'showDbFolder',
+  'bootstrap', 'retryDb', 'dbInfo', 'setDbTools', 'showDbFolder', 'previewContacts', 'applyContacts', 'contactsInfo', 'clearContacts',
   'listChats', 'listAllChats', 'searchChats', 'getMessages', 'openChat', 'setActiveChat', 'setMuted', 'testNotification', 'openNotificationSettings', 'sendMessage', 'editMessage', 'deleteForEveryone', 'pickPhoto', 'saveMedia', 'setChatPartner',
   'listLoops', 'flagMessage', 'loopAction', 'listTeam', 'setTeam', 'removeTeam', 'usage',
-  'startPairing', 'refreshPairing', 'cancelPairing', 'reconnect', 'unlink',
+  'startPairing', 'refreshPairing', 'cancelPairing', 'reconnect', 'unlink', 'setNumberLang', 'setUiPrefs',
   'getSettings', 'saveSettings', 'checkAi', 'testKey', 'disconnectKey',
   'summarize', 'cancelRun', 'lastSummary', 'setPinned', 'autoStatus',
   'listReports', 'generateReport', 'deleteReport', 'exportReport', 'copyText',

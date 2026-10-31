@@ -6,23 +6,30 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pg from 'pg';
+import { PgServerError, WinPgServer } from './server-win';
 
 // The Postgres server shipped inside WA Turbo (vendor/postgres, copied in by scripts/prepare-postgres.mjs).
 // Data lives in ~/Library/Application Support/WA Turbo/postgres/data. The app talks to it over a Unix socket in
 // a folder only this Mac user can open; TCP on 127.0.0.1 is opened only when "database tools" is switched on.
 // If WA Turbo was force-quit, the server keeps running and the next launch adopts it through the same socket.
+// Windows runs the same server through WinPgServer (server-win.ts): TCP on 127.0.0.1 with a password, data in %LOCALAPPDATA%.
 
 export const PG_PORT = 54320;
 export const PG_USER = 'wa_turbo';
 export const PG_DATABASE = 'wa_turbo';
 export const TOOLS_HOST = '127.0.0.1';
 
-export const pgHome = (): string => join(app.getPath('userData'), 'postgres');
+/** On Windows the data goes to %LOCALAPPDATA%, not the roaming userData, so a roaming profile never copies a live database around. */
+export function pgHome(): string {
+  const local = process.platform === 'win32' && !process.env.WA_TURBO_USER_DATA ? process.env.LOCALAPPDATA : undefined;
+  return local ? join(local, 'WA Turbo', 'postgres') : join(app.getPath('userData'), 'postgres');
+}
 const dataPath = (): string => join(pgHome(), 'data');
 const logPath = (): string => join(pgHome(), 'server.log');
 
 export function binDir(): string {
-  return app.isPackaged ? join(process.resourcesPath, 'postgres', 'bin') : join(app.getAppPath(), 'vendor', 'postgres', 'bin');
+  const vendor = process.platform === 'win32' ? 'postgres-win32-x64' : 'postgres';
+  return app.isPackaged ? join(process.resourcesPath, 'postgres', 'bin') : join(app.getAppPath(), 'vendor', vendor, 'bin');
 }
 
 /** macOS caps a socket path at 104 bytes, so a long userData folder falls back to a per-user temp folder. */
@@ -67,7 +74,7 @@ export function portFree(port: number, host: string): Promise<boolean> {
   });
 }
 
-export class PgServerError extends Error {}
+export { PgServerError };
 
 export interface ToolsAccess { host: string; port: number; database: string; user: string; password: string }
 
@@ -223,4 +230,4 @@ class PgServer {
   }
 }
 
-export const pgServer = new PgServer();
+export const pgServer = process.platform === 'win32' ? new WinPgServer(() => ({ home: pgHome(), bin: binDir() })) : new PgServer();

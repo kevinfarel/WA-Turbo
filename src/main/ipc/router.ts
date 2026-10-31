@@ -4,7 +4,7 @@ import { readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 import type { Api, EventKey, Events } from '@shared/ipc';
 import type { AiProvider, AiStatus, Bootstrap, DbInfo, Loop } from '@shared/types';
-import { dbPassword, dbTools, externalDatabaseUrl, getApiKey, setApiKey, setDbTools } from '../config';
+import { dbPassword, dbTools, externalDatabaseUrl, getApiKey, HERE, setApiKey, setDbTools } from '../config';
 import * as Q from '../db/queries';
 import { isConnected, q1 } from '../db/client';
 import { pgHome, pgServer, portFree, PG_PORT, TOOLS_HOST } from '../db/server';
@@ -14,9 +14,12 @@ import { claudeCodeStatus, forgetClaude } from '../ai/claude-code';
 import { summarizeChat } from '../ai/summarize';
 import { generateReport } from '../ai/report';
 import { autoSummary } from '../ai/auto';
+import { langDetect } from '../ai/language';
+import { applyUi } from '../ui';
 import { notifier } from '../notify/center';
 import type { WaManager } from '../wa/manager';
 import { cacheMedia, extOf, loadMedia } from '../media';
+import { applyContacts, guessCountry, previewContacts } from '../contacts/import';
 
 export function broadcast<K extends EventKey>(key: K, payload: Events[K]): void {
   for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send('evt', key, payload);
@@ -33,13 +36,17 @@ const MAX_PHOTO_BYTES = 16 * 1024 * 1024;
 const EDIT_WINDOW_MS = 15 * 60_000;
 const REVOKE_WINDOW_MS = 48 * 3600_000;
 
-/** JPEG and PNG go as they are; anything else macOS can open (HEIC, WebP, TIFF…) is sent as JPEG. */
+// What the photo picker offers: macOS also decodes HEIC, WebP and TIFF; Windows only what Chromium's own decoders read.
+const PHOTO_EXT = process.platform === 'darwin' ? ['jpg', 'jpeg', 'png', 'heic', 'webp', 'tiff', 'gif'] : ['jpg', 'jpeg', 'png', 'bmp', 'gif'];
+const NOT_A_PHOTO = process.platform === 'darwin' ? 'WA Turbo can only send photos (JPEG, PNG, HEIC, WebP).' : 'WA Turbo can only send photos (JPEG, PNG).';
+
+/** JPEG and PNG go as they are; anything else the system can open is sent as JPEG. */
 async function readPhoto(path: string): Promise<{ buf: Buffer; mime: string }> {
   const ext = extname(path).toLowerCase();
   if (ext === '.jpg' || ext === '.jpeg') return { buf: await readFile(path), mime: 'image/jpeg' };
   if (ext === '.png') return { buf: await readFile(path), mime: 'image/png' };
   const img = nativeImage.createFromPath(path);
-  if (img.isEmpty()) throw new Error('WA Turbo can only send photos (JPEG, PNG, HEIC, WebP).');
+  if (img.isEmpty()) throw new Error(NOT_A_PHOTO);
   return { buf: img.toJPEG(90), mime: 'image/jpeg' };
 }
 
@@ -104,6 +111,12 @@ export function registerIpc(d: RouterDeps): void {
       tools: pgServer.tools(dbPassword()), toolsError: pgServer.toolsError };
   };
 
+  /** Names changed (contacts import): every chat list, SUM UP! card and open chat redraws with the new names. */
+  const namesChanged = async () => {
+    for (const a of await Q.listAccounts()) broadcast('chats-changed', { acct: a.id });
+    broadcast('loops-changed', await Q.listLoops());
+  };
+
   /** After the team changes: let replies from teammates settle open loops, then refresh the window. */
   const teamSettled = async () => {
     for (const chatId of await Q.chatsWithOpenLoops()) await resolveLoops(chatId).catch(() => false);
@@ -123,6 +136,10 @@ export function registerIpc(d: RouterDeps): void {
       if (!st.ok) throw new Error(st.error ?? "WA Turbo's database didn't restart.");
       return dbInfo();
     },
+    previewContacts: (data, fileName, countryCode) => previewContacts(new Uint8Array(data), fileName, countryCode),
+    applyContacts: async (token, keep) => { const r = await applyContacts(token, keep); await namesChanged(); return r; },
+    contactsInfo: async () => ({ ...(await Q.phonebookInfo()), countryCode: await guessCountry((await Q.getSettings()).contactsCountry) }),
+    clearContacts: async () => { const n = await Q.clearPhonebook(); await namesChanged(); return n; },
     showDbFolder: async () => { if (!externalDatabaseUrl()) await shell.openPath(pgHome()); },
 
     listChats: acct => Q.listChats(acct),
@@ -138,10 +155,12 @@ export function registerIpc(d: RouterDeps): void {
       await notifier.apply(await Q.getSettings());
     },
     testNotification: async () => {
-      if (!notifier.supported()) throw new Error('macOS notifications are not available.');
+      if (!notifier.supported()) throw new Error('Notifications are not available on ' + HERE + '.');
       notifier.test();
     },
-    openNotificationSettings: async () => { await shell.openExternal('x-apple.systempreferences:com.apple.Notifications-Settings.extension'); },
+    openNotificationSettings: async () => {
+      await shell.openExternal(process.platform === 'win32' ? 'ms-settings:notifications' : 'x-apple.systempreferences:com.apple.Notifications-Settings.extension');
+    },
 
     // The one way out to WhatsApp: a message typed in the composer and sent with the window in front.
     // Nothing in WA Turbo sends on a timer, on a rule, or from Claude's output.
@@ -189,14 +208,14 @@ export function registerIpc(d: RouterDeps): void {
     },
     pickPhoto: async () => {
       const w = BrowserWindow.getFocusedWindow();
-      const opts = { title: 'Send a photo', properties: ['openFile' as const], filters: [{ name: 'Photos', extensions: ['jpg', 'jpeg', 'png', 'heic', 'webp', 'tiff', 'gif'] }] };
+      const opts = { title: 'Send a photo', properties: ['openFile' as const], filters: [{ name: 'Photos', extensions: PHOTO_EXT }] };
       const r = w ? await dialog.showOpenDialog(w, opts) : await dialog.showOpenDialog(opts);
       const path = r.filePaths[0];
       if (r.canceled || !path) return null;
       const { size } = await stat(path);
       if (size > MAX_PHOTO_BYTES) throw new Error('That photo is larger than 16 MB, which WhatsApp does not accept.');
       const img = nativeImage.createFromPath(path);
-      if (img.isEmpty()) throw new Error('WA Turbo can only send photos (JPEG, PNG, HEIC, WebP).');
+      if (img.isEmpty()) throw new Error(NOT_A_PHOTO);
       const token = randomUUID();
       picked.set(token, path);
       return { token, name: basename(path), size, preview: img.resize({ height: 120 }).toDataURL() };
@@ -205,7 +224,7 @@ export function registerIpc(d: RouterDeps): void {
       const f = await loadMedia(Number(messageId));
       const name = f.fileName || `WhatsApp photo ${messageId}.${extOf(f.mime)}`;
       const w = BrowserWindow.getFocusedWindow();
-      const opts = { title: 'Save to this Mac', defaultPath: join(app.getPath('downloads'), name) };
+      const opts = { title: 'Save to ' + HERE, defaultPath: join(app.getPath('downloads'), name) };
       const r = w ? await dialog.showSaveDialog(w, opts) : await dialog.showSaveDialog(opts);
       if (r.canceled || !r.filePath) return null;
       await writeFile(r.filePath, f.buf);
@@ -265,6 +284,18 @@ export function registerIpc(d: RouterDeps): void {
     cancelPairing: () => d.manager.cancelPairing(),
     reconnect: id => d.manager.reconnect(id),
     unlink: id => d.manager.unlink(id),
+    setNumberLang: async (id, lang) => {
+      if (lang === null) await Q.forgetAccountLang(id);
+      else await Q.setAccountLang(id, lang, false);
+      if (lang === null) langDetect.poke(true);
+      const accounts = await Q.listAccounts();
+      broadcast('accounts', accounts);
+      return accounts;
+    },
+    setUiPrefs: async p => {
+      applyUi(p);
+      await notifier.apply(await Q.getSettings());
+    },
 
     getSettings: () => Q.getSettings(),
     saveSettings: async patch => {
@@ -275,13 +306,19 @@ export function registerIpc(d: RouterDeps): void {
       return saved;
     },
     autoStatus: async () => autoSummary.status(),
-    checkAi: async () => { forgetClaude(); return aiStatus((await Q.getSettings()).provider); },
+    checkAi: async () => {
+      forgetClaude();
+      const st = await aiStatus((await Q.getSettings()).provider);
+      if (st.connected) langDetect.poke(true);
+      return st;
+    },
     testKey: async key => {
       try {
         const s = await Q.getSettings();
         await testKey(key.trim(), s.model);
         setApiKey(key.trim());
         resetClient();
+        langDetect.poke(true);
         return { ok: true, error: null };
       } catch (e) {
         return { ok: false, error: e instanceof Error ? e.message : String(e) };

@@ -2,16 +2,22 @@ import { app, safeStorage } from 'electron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
+import type { UiPrefs } from '@shared/types';
 
-// ~/Library/Application Support/WA Turbo/config.json (mode 600) holds the Anthropic key, encrypted with
-// safeStorage (macOS Keychain) and never stored in Postgres, plus the password database tools use to reach the
+// config.json in userData (~/Library/Application Support/WA Turbo, %APPDATA%\WA Turbo on Windows; mode 600) holds
+// the Anthropic key, encrypted with safeStorage (macOS Keychain, Windows DPAPI) and never stored in Postgres, plus the password database tools use to reach the
 // built-in Postgres over 127.0.0.1 when that is switched on. The app itself connects over a private socket.
 
 interface ConfigFile {
   apiKeyEnc?: string;
   dbPassword?: string;
   dbTools?: boolean;
+  /** App language and theme as the window last set them, so the next launch opens in the right colours. */
+  ui?: UiPrefs;
 }
+
+/** How the app names the computer in its copy. */
+export const HERE = process.platform === 'win32' ? 'this PC' : 'this Mac';
 
 export const dataDir = (): string => app.getPath('userData');
 export const mediaDir = (): string => join(dataDir(), 'media');
@@ -47,6 +53,12 @@ export const dbTools = (): boolean => read().dbTools === true;
 
 export function setDbTools(on: boolean): void {
   write({ ...read(), dbTools: on });
+}
+
+export const uiPrefs = (): UiPrefs | null => read().ui ?? null;
+
+export function setUiPrefs(ui: UiPrefs): void {
+  write({ ...read(), ui });
 }
 
 export function getApiKey(): string | null {

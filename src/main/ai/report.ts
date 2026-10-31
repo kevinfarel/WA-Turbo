@@ -1,12 +1,12 @@
-import type { ChatInsight, Message, ModelId, PresetId, Report } from '@shared/types';
+import type { ChatInsight, Lang, Message, ModelId, PresetId, Report } from '@shared/types';
 import { fmtDur, loopAge, loopPending, loopSla, SLA_ORDER } from '@shared/sla';
 import { PRESETS } from '@shared/presets';
 import {
-  addAliases, cachedSummary, chatMeta, chatRev, listAccounts, listAliases, listLoops, messagesSince, saveReport, saveSummary, setSummarized,
+  addAliases, cachedSummary, chatMeta, chatRev, langOfChat, listAccounts, listAliases, listLoops, messagesSince, saveReport, saveSummary, setSummarized,
 } from '../db/queries';
 import { MODEL_NAMES, structured } from './client';
 import { stamp, transcript } from './context';
-import { CUSTOM_SYSTEM, PRESET_FOCUS, SYNTH_SYSTEM } from './prompts';
+import { customSystem, PRESET_FOCUS, synthSystem } from './prompts';
 import { AliasBook, redact, restore } from './redact';
 import { SynthesisOut } from './schemas';
 import { analyzeChat, stepper, type Progress } from './summarize';
@@ -23,6 +23,12 @@ async function pool<T, R>(items: T[], n: number, fn: (t: T) => Promise<R>): Prom
     while (i < items.length) { const k = i++; out[k] = await fn(items[k]); }
   }));
   return out;
+}
+
+/** A report spans numbers: its overview is written in the language most of its chats' numbers use; a tie is English. */
+export function reportLang(langs: Lang[]): Lang {
+  const id = langs.filter(l => l === 'id').length;
+  return id > langs.length - id ? 'id' : 'en';
 }
 
 export async function generateReport(
@@ -44,11 +50,11 @@ export async function generateReport(
   await pool(chats, 3, async c => {
     const key = 'days:' + days;
     const rev = await chatRev(c.id);
-    const prev = await cachedSummary(c.id, model, key, rev);
+    const prev = await cachedSummary(c.id, model, key, rev, await langOfChat(c.id));
     if (prev) { insights[c.id] = prev.insight; return; }
     const run = await analyzeChat(c.id, c.msgs, model, signal);
     insights[c.id] = run.insight;
-    await saveSummary({ chatId: c.id, model, createdAt: Date.now(), msgCount: run.msgCount, insight: run.insight, windowKey: key, auto: false }, c.msgs.length, run.lastMsgId, rev);
+    await saveSummary({ chatId: c.id, model, createdAt: Date.now(), msgCount: run.msgCount, insight: run.insight, windowKey: key, auto: false, lang: run.lang }, c.msgs.length, run.lastMsgId, rev);
     await resolveLoops(c.id);
   });
 
@@ -72,23 +78,28 @@ export async function generateReport(
   const acctNames = [...new Set(picked.map(c => c.meta.account_id))].map(id => accounts.find(a => a.id === id)?.name ?? '');
 
   let overview = '';
+  const lang = reportLang(picked.map(c => accounts.find(a => a.id === c.meta.account_id)?.lang ?? 'en'));
   if (picked.length && presetId === 'debt') {
     const neverChased = waiting.filter(l => !l.nudges.length).length;
-    overview = `${loops.length} open loop${loops.length === 1 ? '' : 's'} across ${picked.length} conversation${picked.length === 1 ? '' : 's'}: ` +
-      `${owed.length} waiting on your reply, ${waiting.length} waiting on the other side, ${overdue.length} past SLA. ` +
-      (longestH ? `The oldest has been open for ${fmtDur(longestH)}. ` : '') +
-      (neverChased ? `${neverChased} of the items you are waiting on have never been chased.` : 'Everything you are waiting on has been chased at least once.');
+    overview = lang === 'id'
+      ? `${loops.length} loop terbuka di ${picked.length} percakapan: ${owed.length} menunggu balasan Anda, ${waiting.length} menunggu pihak lain, ${overdue.length} lewat SLA. ` +
+        (longestH ? `Yang paling lama sudah terbuka ${fmtDur(longestH, lang)}. ` : '') +
+        (neverChased ? `${neverChased} hal yang Anda tunggu belum pernah ditagih.` : 'Semua yang Anda tunggu sudah ditagih setidaknya sekali.')
+      : `${loops.length} open loop${loops.length === 1 ? '' : 's'} across ${picked.length} conversation${picked.length === 1 ? '' : 's'}: ` +
+        `${owed.length} waiting on your reply, ${waiting.length} waiting on the other side, ${overdue.length} past SLA. ` +
+        (longestH ? `The oldest has been open for ${fmtDur(longestH, lang)}. ` : '') +
+        (neverChased ? `${neverChased} of the items you are waiting on have never been chased.` : 'Everything you are waiting on has been chased at least once.');
   } else if (picked.length) {
     const book = new AliasBook(await listAliases());
     let user: string;
     let system: string;
     if (presetId === 'custom') {
-      system = CUSTOM_SYSTEM;
+      system = customSystem(lang);
       const raw = picked.map(c => transcript(c.meta.name, '', c.msgs, book.aliasFor)).join('\n\n---\n\n');
       const material = raw.length <= RAW_BUDGET_CHARS ? raw : redact(JSON.stringify(picked.map(c => ({ chat: c.meta.name, brief: insights[c.id] }))), book.aliasFor);
       user = `Now: ${stamp(now)}\nWindow: ${RANGE_LABEL[days]}\n\nQuestion: ${redact(custom, book.aliasFor)}\n\n${material}`;
     } else {
-      system = SYNTH_SYSTEM;
+      system = synthSystem(lang);
       const briefs = picked.map(c => ({ chat: c.meta.name, number: accounts.find(a => a.id === c.meta.account_id)?.name, messages: c.msgs.length, brief: insights[c.id] }));
       user = `Now: ${stamp(now)}\nWindow: ${RANGE_LABEL[days]}\nReport type: ${PRESETS.find(p => p.id === presetId)?.name}. ${PRESET_FOCUS[presetId]}\n\n` +
         redact(JSON.stringify(briefs, null, 1), book.aliasFor);
