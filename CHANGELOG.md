@@ -63,7 +63,8 @@ First macOS release, using a separately installed PostgreSQL (Docker or Postgres
 - Notifications by tier, menu bar count of pinned chats waiting on you, per-chat mute.
 - My team for group chats, and Claude usage per number.
 
-[Unreleased]: https://github.com/kevinfarel/WA-Turbo/compare/v0.3.0...development
+[Unreleased]: https://github.com/kevinfarel/WA-Turbo/compare/v0.4.0...development
+[0.4.0]: https://github.com/kevinfarel/WA-Turbo/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/kevinfarel/WA-Turbo/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/kevinfarel/WA-Turbo/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/kevinfarel/WA-Turbo/releases/tag/v0.1.0
