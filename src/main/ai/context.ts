@@ -1,4 +1,5 @@
 import type { Loop, Message, MessageType } from '@shared/types';
+import { withMentions } from '@shared/mentions';
 import { redact, type AliasFor } from './redact';
 
 // Builds the text that leaves the Mac: message text and captions. Photos the run attaches are
@@ -25,7 +26,7 @@ export function stamp(t: number): string {
 export function lineOf(m: Message, aliasFor: AliasFor, attached?: Set<string>): string {
   const who = m.who === 'me' ? 'You' : m.team ? m.who + ' (your team)' : m.who;
   const ph = attached?.has(m.id) ? `[photo, attached above as "Photo [#${m.id}]"]` : PLACEHOLDER[m.type];
-  const body = [ph, m.text].filter(Boolean).join(' ');
+  const body = [ph, withMentions(m.text, m.mentions)].filter(Boolean).join(' ');
   return `[#${m.id}] ${stamp(m.at)} · ${redact(who, aliasFor)}: ${redact(body || '[empty]', aliasFor)}`;
 }
 

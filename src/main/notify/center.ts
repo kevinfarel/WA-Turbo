@@ -1,5 +1,6 @@
 import { app, BrowserWindow, Menu, Notification, Tray, nativeImage, type MenuItemConstructorOptions } from 'electron';
 import type { Loop, Message, OverdueChat, Settings } from '@shared/types';
+import { withMentions } from '@shared/mentions';
 import { fmtDur } from '@shared/sla';
 import * as Q from '../db/queries';
 import type { IngestAlert, IngestResult } from '../ingest/upsert';
@@ -273,7 +274,7 @@ export class Notifier {
   }
 
   private preview(m: Message, count: number): string {
-    const text = !this.s.notifyPreview ? L('New message', 'Pesan baru') : m.text ? m.text.replace(/\s+/g, ' ').slice(0, 180) : Q.mediaLabel(m.type);
+    const text = !this.s.notifyPreview ? L('New message', 'Pesan baru') : m.text ? withMentions(m.text, m.mentions).replace(/\s+/g, ' ').slice(0, 180) : Q.mediaLabel(m.type);
     return count > 1 ? msgs(count) + (this.s.notifyPreview ? ' · ' + text : '') : text;
   }
 

@@ -2,7 +2,7 @@
 
 export type AccountStatus = 'pairing' | 'online' | 'reconnecting' | 'logged_out';
 export type Accent = 'green' | 'blue' | 'amber' | 'violet' | 'cyan';
-/** The languages WA Turbo speaks: the app itself, and what Claude writes for a number. */
+/** The languages WA Turbo speaks: the app itself, and what the AI writes for a number. */
 export type Lang = 'en' | 'id';
 export type ThemeMode = 'light' | 'dark' | 'system';
 /** What the window tells the main process about how it looks: language, light/dark, and the colours of the theme in use. */
@@ -16,7 +16,7 @@ export interface Account {
   accent: Accent;
   status: AccountStatus;
   pairedAt: number | null;
-  /** What Claude writes in for this number; null until picked or detected from its chats. */
+  /** What the AI writes in for this number; null until picked or detected from its chats. */
   lang: Lang | null;
   /** True when lang was detected from the chats rather than picked. */
   langDetected: boolean;
@@ -65,7 +65,12 @@ export interface Message {
   edited: boolean;
   /** Sent by someone you marked as your team. */
   team?: boolean;
+  /** People tagged in the text: "@<number>" as written → the name to show ('You' for you). */
+  mentions?: Record<string, string>;
 }
+
+/** Someone in a group you can tag with @ in the composer. */
+export interface GroupMember { jid: string; name: string; phone: string }
 
 export type LoopDir = 'owed' | 'waiting';
 export type LoopKind = 'question' | 'confirmation' | 'commitment';
@@ -89,7 +94,7 @@ export interface Loop {
   answeredAt: number | null;
   nudges: number[]; // times of your own follow-ups, newest first
   chases: number; // follow-ups from the other side (counted, do not restart the clock)
-  aiHint: string | null; // e.g. Claude thinks this was answered
+  aiHint: string | null; // e.g. the AI thinks this was answered
   closeNote: string | null; // why the rules closed it on their own
 }
 
@@ -104,21 +109,39 @@ export interface Partner {
   at: number;
 }
 
-export type ModelId = 'claude-opus-5-5' | 'claude-sonnet-5-5' | 'claude-haiku-5-5';
+export type ClaudeModel = 'claude-opus-5-5' | 'claude-sonnet-5-5' | 'claude-haiku-5-5';
+/** A Claude model, or "<provider>:<model>" for the other providers (shared/ai.ts). */
+export type ModelId = string;
 
-/** How WA Turbo reaches Claude: the Claude Code login on this Mac (the person's Claude plan) or an API key (billed per token). */
-export type AiProvider = 'claude-code' | 'api';
+/**
+ * How WA Turbo reaches an AI: the Claude Code login (the person's Claude plan), an Anthropic API key, the engine
+ * person's own Ollama models (local), a Gemini key, any OpenAI-compatible service, or the Antigravity and Codex CLIs.
+ */
+export type AiProvider = 'claude-code' | 'api' | 'local' | 'gemini' | 'openai' | 'antigravity' | 'codex';
 
 /** What the Summarize button reads: this week (Monday 00:00 to now, newest 300 at most) or a fixed count. */
 export type SummaryWindow = 'week' | 50 | 100 | 300;
 
 export interface Settings {
   provider: AiProvider;
-  model: ModelId;
+  /** The Claude model, used by the Claude Code login and the API key. */
+  model: ClaudeModel;
+  /** Each other provider's model; empty means that provider's own default. */
+  localModel: string;
+  geminiModel: string;
+  openaiModel: string;
+  /** OpenAI-compatible: the service's base URL, e.g. https://api.groq.com/openai/v1. */
+  openaiBaseUrl: string;
+  agyModel: string;
+  codexModel: string;
+  /** The person accepted that Google may use messages sent with a free Gemini key to improve its products. */
+  geminiAgreed: boolean;
+  /** Gemini and Antigravity: auto summary stops after this many runs a day (0 = no limit). */
+  autoDailyBudget: number;
   window: SummaryWindow;
   customPrompt: string;
   openAtLogin: boolean;
-  /** Let Claude see photos in the chat (the most recent 10 per chat) when summarizing. */
+  /** Let the AI see photos in the chat (the most recent 10 per chat) when summarizing. */
   aiImages: boolean;
   /** Auto summary: pinned chats every pinEveryMin from their last pinWindow messages; others likewise (0 = off). */
   autoOn: boolean;
@@ -159,7 +182,7 @@ export interface ContactImportPreview {
 export interface ContactImportResult { saved: number; kept: number; renamedChats: number }
 export interface ContactsInfo { count: number; updatedAt: number | null; countryCode: string }
 
-/** Claude tokens for one hour and one number (acct null = report overviews across numbers). */
+/** AI tokens for one hour and one number (acct null = report overviews across numbers). */
 export interface UsageBucket { hour: number; acct: string | null; input: number; output: number; cacheRead: number; cacheWrite: number; runs: number }
 
 /** Someone on your side in group chats. */
@@ -185,10 +208,18 @@ export interface AiStatus {
   provider: AiProvider;
   connected: boolean;
   testing: boolean;
-  /** Claude Code only: whether the CLI was found, and who it is signed in as ("me@x.com · Pro"). */
+  /** CLI providers: whether the CLI was found. Local model: whether Ollama is running. */
   cliFound: boolean;
+  /** Who or what it runs as: "me@x.com · Pro", "Ollama 0.40.5". */
   account: string | null;
+  /** Local model: the models installed in Ollama. */
+  models?: string[];
+  /** Why it isn't connected, when there is more to say than the banners. */
+  detail?: string | null;
 }
+
+/** Ollama on this computer: running or not, and the models installed there. */
+export interface LocalFound { running: boolean; models: string[]; version: string | null }
 
 export interface InsightAction { t: string; owner: string; due: string; cite: string | null }
 
@@ -214,7 +245,7 @@ export interface SummaryResult {
   lang?: Lang;
   /** Older messages this week left out by the 300-message cap. */
   skipped?: number;
-  /** True when nothing changed and the saved summary was returned without calling Claude. */
+  /** True when nothing changed and the saved summary was returned without calling the AI. */
   cached?: boolean;
 }
 

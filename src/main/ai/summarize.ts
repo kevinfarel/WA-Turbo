@@ -4,7 +4,8 @@ import { weekStart, ymd } from '@shared/week';
 import {
   addAliases, cachedSummary, chatMeta, chatRev, createLoop, getSettings, messagesSinceCapped, getMessages, langOfChat, lastMessageId, listAliases, loopsForChat, reviewLoop, saveSummary, setLoopState, setSummarized,
 } from '../db/queries';
-import { MODEL_NAMES, structured, type AiImage } from './client';
+import { modelLabel } from '@shared/ai';
+import { structured, type AiImage } from './client';
 import { imageForAi } from '../media';
 import { resolveLoops } from '../loops/service';
 import { openLoopsBlock, stamp, transcript } from './context';
@@ -143,7 +144,7 @@ export async function summarizeChat(chatId: string, model: ModelId, opts: Summar
   const { messages } = win;
   if (!messages.length) throw new Error(opts.window === 'week' ? EMPTY_WEEK : 'This chat has no messages yet.');
   const s = stepper(runId, 'summary', chatId, [
-    `Reading text from ${messages.length} messages`, 'Redacting phone numbers', 'Checking open loops', `${MODEL_NAMES[model]} is summarizing`, 'Formatting the summary',
+    `Reading text from ${messages.length} messages`, 'Redacting phone numbers', 'Checking open loops', `${modelLabel(model)} is summarizing`, 'Formatting the summary',
   ], emit);
   s.next();
   const run = await analyzeChat(chatId, messages, model, signal, () => s.next(), () => { s.next(); s.next(); }, opts.auto ? 'auto' : 'summary');

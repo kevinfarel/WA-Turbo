@@ -3,6 +3,8 @@ import type {
   Account, Accent, AccountStatus, ChatInsight, Lang, ChatKind, ChatSummaryRow, Loop, LoopDir, LoopKind, LoopSource, LoopState,
   Message, MessageType, ModelId, Partner, PresetId, Report, Settings, SummaryResult, TeamMember, UsageBucket,
 } from '@shared/types';
+import { withMentions } from '@shared/mentions';
+import { formatPhone } from '@shared/phone';
 import { DEFAULT_SLA_H } from '@shared/sla';
 import { q, q1, tx } from './client';
 
@@ -95,6 +97,21 @@ export async function authClear(accountId: string): Promise<void> {
 
 export interface ContactIn { jid: string; lid?: string | null; phone?: string | null; name?: string | null; notify?: string | null }
 
+/** Saved names (imported or from the phone) for several people at once, keyed by the ID asked for. */
+export async function contactNames(accountId: string, jids: string[]): Promise<Map<string, string>> {
+  const rows = await q<{ jid: string; name: string | null }>('SELECT j AS jid, contact_name($1, j) AS name FROM unnest($2::text[]) j', [accountId, jids]);
+  return new Map(rows.filter(r => r.name).map(r => [r.jid, r.name!]));
+}
+
+/** The name each person last showed on a message they sent (their WhatsApp profile name), skipping bare numbers. */
+export async function senderNames(accountId: string, jids: string[]): Promise<Map<string, string>> {
+  const rows = await q<{ jid: string; name: string }>(
+    `SELECT DISTINCT ON (sender_jid) sender_jid AS jid, sender_name AS name FROM messages
+      WHERE account_id = $1 AND sender_jid = ANY($2) AND NOT from_me AND coalesce(sender_name, '') !~ '^[+0-9 ()-]*$'
+      ORDER BY sender_jid, sent_at DESC`, [accountId, jids]);
+  return new Map(rows.map(r => [r.jid, r.name]));
+}
+
 export async function upsertContacts(accountId: string, list: ContactIn[]): Promise<void> {
   if (!list.length) return;
   await tx(async c => {
@@ -134,17 +151,20 @@ export async function chatMeta(chatId: string): Promise<{ id: string; account_id
 /** Display names: your contact name (imported .vcf, else the name saved on the number's phone), else what WhatsApp sent. */
 const DM_NAME = `CASE WHEN c.kind = 'dm' THEN coalesce(contact_name(c.account_id, c.jid), nullif(c.name, '')) ELSE c.name END`;
 const SENDER_NAME = `CASE WHEN from_me THEN sender_name ELSE coalesce(contact_name(account_id, sender_jid), sender_name) END AS sender_name`;
+// Each tag in the text with the person's ID and saved name: {"<number>": [jid, name]}.
+const mentionsOf = (t: string) => `(SELECT jsonb_object_agg(e.key, jsonb_build_array(e.value, contact_name(${t}.account_id, e.value))) FROM jsonb_each_text(${t}.mentions) e) AS mentions`;
+const MENTIONS = mentionsOf('messages');
 
 const CHAT_ROW_SQL = `
   SELECT c.id, c.account_id, ${DM_NAME} AS name, c.subtitle, c.kind, c.unread, c.partner_id, c.service, c.stage, c.summarized_at, c.jid,
          coalesce(c.last_message_at, c.created_at) AS last_at, c.pinned_at, c.auto_checked_at, c.notify_muted_until,
-         lm.from_me, lm.sender_name, lm.text, lm.type,
+         lm.from_me, lm.sender_name, lm.text, lm.type, lm.mentions,
          (SELECT count(*) FROM messages m WHERE m.chat_id = c.id AND NOT m.deleted) AS msg_count,
          ls.created_at AS sum_at, coalesce(ls.auto, false) AS sum_auto,
          CASE WHEN ls.created_at IS NULL THEN 0 ELSE (SELECT count(*) FROM messages m WHERE m.chat_id = c.id AND NOT m.deleted AND m.type <> 'system'
            AND m.id > coalesce(ls.last_message_id, 0)) END AS new_since
   FROM chats c
-  LEFT JOIN LATERAL (SELECT from_me, CASE WHEN from_me THEN sender_name ELSE coalesce(contact_name(account_id, sender_jid), sender_name) END AS sender_name, text, type FROM messages m WHERE m.chat_id = c.id AND NOT m.deleted
+  LEFT JOIN LATERAL (SELECT from_me, CASE WHEN from_me THEN sender_name ELSE coalesce(contact_name(account_id, sender_jid), sender_name) END AS sender_name, text, type, ${mentionsOf('m')} FROM messages m WHERE m.chat_id = c.id AND NOT m.deleted
                      ORDER BY sent_at DESC LIMIT 1) lm ON true
   LEFT JOIN LATERAL (SELECT created_at, auto, last_message_id FROM summaries s WHERE s.chat_id = c.id
                      ORDER BY created_at DESC LIMIT 1) ls ON true`;
@@ -154,13 +174,13 @@ interface ChatRow {
   service: string | null; stage: string | null; summarized_at: number | null; jid: string; last_at: number;
   from_me: boolean | null; sender_name: string | null; text: string | null; type: MessageType | null; msg_count: number;
   pinned_at: number | null; auto_checked_at: number | null; sum_at: number | null; sum_auto: boolean; new_since: number;
-  notify_muted_until: number | null;
+  notify_muted_until: number | null; mentions: MessageRow['mentions'];
 }
 
 const toChat = (r: ChatRow): ChatSummaryRow => ({
   id: r.id, acct: r.account_id, name: r.name || r.jid.split('@')[0], org: r.subtitle, kind: r.kind, unread: r.unread,
   partner: r.partner_id, service: r.service, stage: r.stage, lastAt: r.last_at,
-  lastWho: r.from_me ? 'me' : r.sender_name || '', lastText: r.text || (r.type && r.type !== 'text' ? mediaLabel(r.type) : ''),
+  lastWho: r.from_me ? 'me' : r.sender_name || '', lastText: withMentions(r.text ?? '', mentionNames(r.mentions)) || (r.type && r.type !== 'text' ? mediaLabel(r.type) : ''),
   msgCount: Number(r.msg_count), summarizedAt: r.summarized_at,
   pinned: r.pinned_at !== null, lastSumAt: r.sum_at, lastSumAuto: r.sum_auto, newSince: Number(r.new_since), autoCheckedAt: r.auto_checked_at,
   mutedUntil: r.notify_muted_until,
@@ -379,7 +399,7 @@ export async function setChatSubtitle(accountId: string, jid: string, subtitle: 
 
 export interface MessageIn {
   waId: string; senderJid: string | null; senderName: string | null; fromMe: boolean; sentAt: number; type: MessageType;
-  text: string; quotedWaId: string | null; quotedFromMe: boolean; mentionsMe: boolean;
+  text: string; quotedWaId: string | null; quotedFromMe: boolean; mentionsMe: boolean; mentions: Record<string, string> | null;
   media: { mime: string; fileName: string | null; thumb: string | null } | null; raw: unknown;
 }
 
@@ -390,13 +410,14 @@ export async function upsertMessages(c: pg.PoolClient, accountId: string, chatId
   let unread = 0;
   for (const m of list) {
     const r = await c.query<{ id: number; inserted: boolean }>(
-      `INSERT INTO messages (account_id, chat_id, wa_id, sender_jid, sender_name, from_me, sent_at, type, text, quoted_wa_id, quoted_from_me, mentions_me, media, raw)
-       VALUES ($1, $2, $3, $4, $5, $6, to_timestamp($7 / 1000.0), $8, $9, $10, $11, $12, $13, $14)
+      `INSERT INTO messages (account_id, chat_id, wa_id, sender_jid, sender_name, from_me, sent_at, type, text, quoted_wa_id, quoted_from_me, mentions_me, media, raw, mentions)
+       VALUES ($1, $2, $3, $4, $5, $6, to_timestamp($7 / 1000.0), $8, $9, $10, $11, $12, $13, $14, $15)
        ON CONFLICT (chat_id, wa_id) DO UPDATE SET text = CASE WHEN excluded.text <> '' THEN excluded.text ELSE messages.text END,
-         sender_name = coalesce(excluded.sender_name, messages.sender_name), media = coalesce(excluded.media, messages.media)
+         sender_name = coalesce(excluded.sender_name, messages.sender_name), media = coalesce(excluded.media, messages.media),
+         mentions = coalesce(excluded.mentions, messages.mentions)
        RETURNING id, (xmax = 0) AS inserted`,
       [accountId, chatId, m.waId, m.senderJid, m.senderName, m.fromMe, m.sentAt, m.type, m.text, m.quotedWaId, m.quotedFromMe, m.mentionsMe,
-        m.media ? JSON.stringify(m.media) : null, m.raw ? JSON.stringify(m.raw) : null]);
+        m.media ? JSON.stringify(m.media) : null, m.raw ? JSON.stringify(m.raw) : null, m.mentions ? JSON.stringify(m.mentions) : null]);
     const row = r.rows[0];
     if (row.inserted) {
       fresh.push({ id: Number(row.id), waId: m.waId });
@@ -422,7 +443,18 @@ export async function deleteMessage(chatId: string, waId: string): Promise<void>
   await q('UPDATE chats SET rev = rev + 1 WHERE id = $1', [chatId]);
 }
 
-interface MessageRow { id: number; chat_id: string; from_me: boolean; sender_name: string | null; sender_jid: string | null; sent_at: number; type: MessageType; text: string; media: { mime: string; fileName: string | null; thumb: string | null } | null; edited: boolean; team?: boolean }
+interface MessageRow { id: number; chat_id: string; from_me: boolean; sender_name: string | null; sender_jid: string | null; sent_at: number; type: MessageType; text: string; media: { mime: string; fileName: string | null; thumb: string | null } | null; edited: boolean; team?: boolean; mentions?: Record<string, [string, string | null]> | null }
+
+/** "@<number>" → the name to show; you are 'You', someone without a saved name is their phone number. */
+function mentionNames(m: MessageRow['mentions']): Record<string, string> | undefined {
+  if (!m) return undefined;
+  const out: Record<string, string> = {};
+  for (const [tok, [jid, name]] of Object.entries(m)) {
+    const shown = jid === 'me' ? 'You' : name || (jid.endsWith('@s.whatsapp.net') ? formatPhone('+' + jid.split('@')[0]) : '');
+    if (shown) out[tok] = shown;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
 
 const toMessage = (r: MessageRow): Message => ({
   id: String(r.id), chatId: r.chat_id, who: r.from_me ? 'me' : r.sender_name || (r.sender_jid ?? '').split('@')[0] || 'Unknown',
@@ -430,6 +462,7 @@ const toMessage = (r: MessageRow): Message => ({
   media: r.media ? { mime: r.media.mime, fileName: r.media.fileName, hasThumb: !!r.media.thumb } : null,
   edited: !!r.edited,
   team: !!r.team,
+  mentions: mentionNames(r.mentions),
 });
 
 /** What edit and delete-for-everyone need to point WhatsApp at one stored message. */
@@ -451,14 +484,14 @@ export async function dismissLoopsOn(messageId: string): Promise<number> {
 
 export async function getMessages(chatId: string, limit: number): Promise<Message[]> {
   const rows = await q<MessageRow>(
-    `SELECT * FROM (SELECT id, chat_id, from_me, ${SENDER_NAME}, sender_jid, sent_at, type, text, media, edited, EXISTS (SELECT 1 FROM team_jids t JOIN chats tc ON tc.id = messages.chat_id AND tc.kind = 'group' WHERE t.jid = messages.sender_jid) AS team FROM messages
+    `SELECT * FROM (SELECT id, chat_id, from_me, ${SENDER_NAME}, sender_jid, sent_at, type, text, media, edited, ${MENTIONS}, EXISTS (SELECT 1 FROM team_jids t JOIN chats tc ON tc.id = messages.chat_id AND tc.kind = 'group' WHERE t.jid = messages.sender_jid) AS team FROM messages
        WHERE chat_id = $1 AND NOT deleted ORDER BY sent_at DESC, id DESC LIMIT $2) t ORDER BY sent_at, id`, [chatId, limit]);
   return rows.map(toMessage);
 }
 
 export async function messagesSince(chatId: string, since: number): Promise<Message[]> {
   const rows = await q<MessageRow>(
-    `SELECT id, chat_id, from_me, ${SENDER_NAME}, sender_jid, sent_at, type, text, media, edited, EXISTS (SELECT 1 FROM team_jids t JOIN chats tc ON tc.id = messages.chat_id AND tc.kind = 'group' WHERE t.jid = messages.sender_jid) AS team FROM messages
+    `SELECT id, chat_id, from_me, ${SENDER_NAME}, sender_jid, sent_at, type, text, media, edited, ${MENTIONS}, EXISTS (SELECT 1 FROM team_jids t JOIN chats tc ON tc.id = messages.chat_id AND tc.kind = 'group' WHERE t.jid = messages.sender_jid) AS team FROM messages
      WHERE chat_id = $1 AND NOT deleted AND sent_at >= to_timestamp($2 / 1000.0) ORDER BY sent_at, id`, [chatId, since]);
   return rows.map(toMessage);
 }
@@ -466,7 +499,7 @@ export async function messagesSince(chatId: string, since: number): Promise<Mess
 /** Messages since `since`, at most the newest `cap`; `skipped` counts the older ones left out. */
 export async function messagesSinceCapped(chatId: string, since: number, cap: number): Promise<{ messages: Message[]; skipped: number }> {
   const rows = await q<MessageRow & { total: number }>(
-    `SELECT * FROM (SELECT id, chat_id, from_me, ${SENDER_NAME}, sender_jid, sent_at, type, text, media, edited, EXISTS (SELECT 1 FROM team_jids t JOIN chats tc ON tc.id = messages.chat_id AND tc.kind = 'group' WHERE t.jid = messages.sender_jid) AS team, count(*) OVER () AS total FROM messages
+    `SELECT * FROM (SELECT id, chat_id, from_me, ${SENDER_NAME}, sender_jid, sent_at, type, text, media, edited, ${MENTIONS}, EXISTS (SELECT 1 FROM team_jids t JOIN chats tc ON tc.id = messages.chat_id AND tc.kind = 'group' WHERE t.jid = messages.sender_jid) AS team, count(*) OVER () AS total FROM messages
        WHERE chat_id = $1 AND NOT deleted AND sent_at >= to_timestamp($2 / 1000.0) ORDER BY sent_at DESC, id DESC LIMIT $3) t ORDER BY sent_at, id`,
     [chatId, since, cap]);
   return { messages: rows.map(toMessage), skipped: rows.length ? Number(rows[0].total) - rows.length : 0 };
@@ -474,7 +507,7 @@ export async function messagesSinceCapped(chatId: string, since: number, cap: nu
 
 export async function messagesByIds(ids: number[]): Promise<Message[]> {
   if (!ids.length) return [];
-  const rows = await q<MessageRow>(`SELECT id, chat_id, from_me, ${SENDER_NAME}, sender_jid, sent_at, type, text, media, edited, EXISTS (SELECT 1 FROM team_jids t JOIN chats tc ON tc.id = messages.chat_id AND tc.kind = 'group' WHERE t.jid = messages.sender_jid) AS team FROM messages WHERE id = ANY($1) ORDER BY sent_at, id`, [ids]);
+  const rows = await q<MessageRow>(`SELECT id, chat_id, from_me, ${SENDER_NAME}, sender_jid, sent_at, type, text, media, edited, ${MENTIONS}, EXISTS (SELECT 1 FROM team_jids t JOIN chats tc ON tc.id = messages.chat_id AND tc.kind = 'group' WHERE t.jid = messages.sender_jid) AS team FROM messages WHERE id = ANY($1) ORDER BY sent_at, id`, [ids]);
   return rows.map(toMessage);
 }
 
@@ -626,6 +659,7 @@ export async function reviewLoop(id: string, p: { topic?: string | null; blocks?
 
 export const DEFAULT_SETTINGS: Settings = {
   provider: 'claude-code', model: 'claude-haiku-5-5', window: 'week', customPrompt: '', openAtLogin: false, aiImages: true,
+  localModel: '', geminiModel: '', openaiModel: '', openaiBaseUrl: '', agyModel: '', codexModel: '', geminiAgreed: false, autoDailyBudget: 100,
   autoOn: true, pinEveryMin: 5, pinWindow: 10, otherEveryMin: 60, otherWindow: 2,
   notifyOn: true, notifyPinnedSound: 'Glass', notifyRemindMin: 10, notifyOthers: 'direct', notifyOtherSound: 'Tink', notifyPreview: true,
   notifyBadge: 'chats', notifyOverdue: true, menuBar: true, notifyPausedUntil: 0, contactsCountry: '',
@@ -708,7 +742,13 @@ export async function logRun(r: { kind: string; model: string; chatId?: string; 
     [r.kind, r.model, r.input ?? null, r.output ?? null, r.cacheRead ?? null, r.cacheWrite ?? null, r.stop ?? null, r.ms, r.error ?? null, r.chatId ?? null]);
 }
 
-/** Claude usage per hour and number since a time (hours line up with local days in whole-hour time zones). */
+/** Auto runs on one provider (its "<provider>:" model prefix) since a time, for the free providers' daily budget. */
+export async function autoRunsSince(prefix: string, since: number): Promise<number> {
+  const r = await q1<{ n: string }>(`SELECT count(*) AS n FROM ai_runs WHERE kind = 'auto' AND starts_with(model, $1) AND created_at >= to_timestamp($2 / 1000.0)`, [prefix, since]);
+  return Number(r?.n ?? 0);
+}
+
+/** AI usage per hour and number since a time (hours line up with local days in whole-hour time zones). */
 export async function usageSince(since: number): Promise<UsageBucket[]> {
   const rows = await q<{ hour: number; acct: string | null; input: number; output: number; cache_read: number; cache_write: number; runs: number }>(
     `SELECT date_trunc('hour', created_at) AS hour, account_id AS acct,

@@ -5,11 +5,17 @@ import { join } from 'node:path';
 import type { UiPrefs } from '@shared/types';
 
 // config.json in userData (~/Library/Application Support/WA Turbo, %APPDATA%\WA Turbo on Windows; mode 600) holds
-// the Anthropic key, encrypted with safeStorage (macOS Keychain, Windows DPAPI) and never stored in Postgres, plus the password database tools use to reach the
+// the Anthropic, Gemini and OpenAI-compatible keys, each encrypted with safeStorage (macOS Keychain, Windows DPAPI) and never stored in Postgres, plus the password database tools use to reach the
 // built-in Postgres over 127.0.0.1 when that is switched on. The app itself connects over a private socket.
+
+/** Providers whose key WA Turbo keeps (the Anthropic key stays in apiKeyEnc, as older versions saved it). */
+export type KeyedProvider = 'gemini' | 'openai';
 
 interface ConfigFile {
   apiKeyEnc?: string;
+  keysEnc?: Partial<Record<KeyedProvider, string>>;
+  /** The last Antigravity check signed in fine (the CLI has no status command, so the check is a tiny run). */
+  agyOk?: boolean;
   dbPassword?: string;
   dbTools?: boolean;
   /** App language and theme as the window last set them, so the next launch opens in the right colours. */
@@ -61,8 +67,7 @@ export function setUiPrefs(ui: UiPrefs): void {
   write({ ...read(), ui });
 }
 
-export function getApiKey(): string | null {
-  const enc = read().apiKeyEnc;
+function decrypt(enc: string | undefined): string | null {
   if (!enc || !safeStorage.isEncryptionAvailable()) return null;
   try {
     return safeStorage.decryptString(Buffer.from(enc, 'base64'));
@@ -71,11 +76,31 @@ export function getApiKey(): string | null {
   }
 }
 
+const encrypt = (key: string): string => safeStorage.encryptString(key).toString('base64');
+
+export const getApiKey = (): string | null => decrypt(read().apiKeyEnc);
+
 export function setApiKey(key: string | null): void {
   const c = read();
   if (key === null) delete c.apiKeyEnc;
-  else c.apiKeyEnc = safeStorage.encryptString(key).toString('base64');
+  else c.apiKeyEnc = encrypt(key);
   write(c);
+}
+
+export const getProviderKey = (p: KeyedProvider): string | null => decrypt(read().keysEnc?.[p]);
+
+export function setProviderKey(p: KeyedProvider, key: string | null): void {
+  const c = read();
+  const keys = { ...c.keysEnc };
+  if (key === null) delete keys[p];
+  else keys[p] = encrypt(key);
+  write({ ...c, keysEnc: keys });
+}
+
+export const agyOk = (): boolean => read().agyOk === true;
+
+export function setAgyOk(ok: boolean): void {
+  write({ ...read(), agyOk: ok });
 }
 
 export function migrationsDir(): string {

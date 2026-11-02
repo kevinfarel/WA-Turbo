@@ -4,13 +4,19 @@ import { readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 import type { Api, EventKey, Events } from '@shared/ipc';
 import type { AiProvider, AiStatus, Bootstrap, DbInfo, Loop } from '@shared/types';
-import { dbPassword, dbTools, externalDatabaseUrl, getApiKey, HERE, setApiKey, setDbTools } from '../config';
+import { activeModel, DEFAULT_MODELS, pickLocal, PROVIDERS } from '@shared/ai';
+import { dbPassword, dbTools, externalDatabaseUrl, getApiKey, getProviderKey, HERE, setApiKey, setDbTools, setProviderKey } from '../config';
 import * as Q from '../db/queries';
 import { isConnected, q1 } from '../db/client';
 import { pgHome, pgServer, portFree, PG_PORT, TOOLS_HOST } from '../db/server';
 import { flagMessage, loopAction, resolveLoops } from '../loops/service';
 import { resetClient, testKey } from '../ai/client';
 import { claudeCodeStatus, forgetClaude } from '../ai/claude-code';
+import { agyStatus, checkAgy, findAgy, forgetAgy } from '../ai/antigravity';
+import { codexStatus, findCodex, forgetCodex } from '../ai/codex';
+import { diagText } from '../ai/diag';
+import { localModels } from '../ai/local';
+import { compatTest, GEMINI_BASE } from '../ai/openai-compat';
 import { summarizeChat } from '../ai/summarize';
 import { generateReport } from '../ai/report';
 import { autoSummary } from '../ai/auto';
@@ -20,6 +26,7 @@ import { notifier } from '../notify/center';
 import type { WaManager } from '../wa/manager';
 import { cacheMedia, extOf, loadMedia } from '../media';
 import { applyContacts, guessCountry, previewContacts } from '../contacts/import';
+import { formatPhone } from '@shared/phone';
 
 export function broadcast<K extends EventKey>(key: K, payload: Events[K]): void {
   for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send('evt', key, payload);
@@ -28,8 +35,8 @@ export function broadcast<K extends EventKey>(key: K, payload: Events[K]): void 
 
 const runs = new Map<string, AbortController>();
 
-// Photos picked in the composer, by token, so the window never hands the main process a file path.
-const picked = new Map<string, string>();
+// Photos picked or pasted in the composer, by token, so the window never hands the main process a file path.
+const picked = new Map<string, { path: string } | { buf: Buffer; mime: string }>();
 let lastSend = { key: '', at: 0 };
 const MAX_PHOTO_BYTES = 16 * 1024 * 1024;
 // WhatsApp's own limits: edits within 15 minutes, delete for everyone within about 2 days.
@@ -39,6 +46,17 @@ const REVOKE_WINDOW_MS = 48 * 3600_000;
 // What the photo picker offers: macOS also decodes HEIC, WebP and TIFF; Windows only what Chromium's own decoders read.
 const PHOTO_EXT = process.platform === 'darwin' ? ['jpg', 'jpeg', 'png', 'heic', 'webp', 'tiff', 'gif'] : ['jpg', 'jpeg', 'png', 'bmp', 'gif'];
 const NOT_A_PHOTO = process.platform === 'darwin' ? 'WA Turbo can only send photos (JPEG, PNG, HEIC, WebP).' : 'WA Turbo can only send photos (JPEG, PNG).';
+
+/** A pasted photo: JPEG and PNG go as they are, anything else the system can decode is sent as JPEG. */
+function pastedPhoto(data: Uint8Array, mime: string): { buf: Buffer; mime: string; img: Electron.NativeImage } {
+  if (!data?.byteLength) throw new Error(NOT_A_PHOTO);
+  if (data.byteLength > MAX_PHOTO_BYTES) throw new Error('That photo is larger than 16 MB, which WhatsApp does not accept.');
+  const buf = Buffer.from(data);
+  const img = nativeImage.createFromBuffer(buf);
+  if (img.isEmpty()) throw new Error(NOT_A_PHOTO);
+  if (mime === 'image/jpeg' || mime === 'image/png') return { buf, mime, img };
+  return { buf: img.toJPEG(90), mime: 'image/jpeg', img };
+}
 
 /** JPEG and PNG go as they are; anything else the system can open is sent as JPEG. */
 async function readPhoto(path: string): Promise<{ buf: Buffer; mime: string }> {
@@ -58,9 +76,41 @@ export interface RouterDeps {
 }
 
 export async function aiStatus(provider: AiProvider): Promise<AiStatus> {
-  if (provider === 'api') return { provider, connected: !!getApiKey(), testing: false, cliFound: false, account: null };
-  const s = await claudeCodeStatus();
-  return { provider, connected: s.loggedIn, testing: false, cliFound: s.installed, account: s.account };
+  const base = { provider, testing: false, cliFound: false, account: null };
+  switch (provider) {
+    case 'api': return { ...base, connected: !!getApiKey() };
+    case 'claude-code': {
+      const s = await claudeCodeStatus();
+      return { ...base, connected: s.loggedIn, cliFound: s.installed, account: s.account };
+    }
+    case 'local': {
+      const [found, s] = await Promise.all([localModels.detect(), Q.getSettings()]);
+      // No model picked yet, or the picked one was removed from Ollama: take the best one installed.
+      let model = s.localModel;
+      if (found.running && !found.models.includes(model)) {
+        model = pickLocal(found.models) ?? '';
+        if (model !== s.localModel) await Q.saveSettings({ localModel: model });
+      }
+      return { ...base, connected: found.running && !!model, cliFound: found.running, models: found.models,
+        account: found.version ? 'Ollama ' + found.version : null };
+    }
+    case 'gemini': {
+      const s = await Q.getSettings();
+      return { ...base, connected: !!getProviderKey('gemini') && s.geminiAgreed };
+    }
+    case 'openai': {
+      const s = await Q.getSettings();
+      return { ...base, connected: !!s.openaiBaseUrl && !!s.openaiModel, account: s.openaiBaseUrl || null };
+    }
+    case 'antigravity': {
+      const s = await agyStatus();
+      return { ...base, connected: s.ok, cliFound: s.installed };
+    }
+    case 'codex': {
+      const s = await codexStatus();
+      return { ...base, connected: s.loggedIn, cliFound: s.installed, account: s.account };
+    }
+  }
 }
 
 export function registerIpc(d: RouterDeps): void {
@@ -93,6 +143,19 @@ export function registerIpc(d: RouterDeps): void {
     const c = await Q.chatMeta(chatId);
     if (!c) throw new Error('That chat no longer exists.');
     return c;
+  };
+
+  // Tags only go to people in this group, and only when the text still has their "@<number>".
+  const checkMentions = async (c: { account_id: string; jid: string; kind: string }, body: string, mentions: string[]): Promise<string[]> => {
+    const list = [...new Set((Array.isArray(mentions) ? mentions : []).filter(j => typeof j === 'string'))];
+    if (!list.length) return [];
+    if (c.kind !== 'group') throw new Error('People can only be tagged in groups.');
+    const members = new Set(((await d.manager.session(c.account_id)?.members(c.jid)) ?? []).map(m => m.id));
+    for (const j of list) {
+      if (!members.has(j)) throw new Error('Someone you tagged is no longer in this group.');
+      if (!body.includes('@' + j.split('@')[0])) throw new Error('A tag was removed from the message. Tag the person again.');
+    }
+    return list;
   };
 
   const ownMessage = async (messageId: string) => {
@@ -164,19 +227,20 @@ export function registerIpc(d: RouterDeps): void {
 
     // The one way out to WhatsApp: a message typed in the composer and sent with the window in front.
     // Nothing in WA Turbo sends on a timer, on a rule, or from Claude's output.
-    sendMessage: async (chatId, text, photoToken) => {
+    sendMessage: async (chatId, text, photoToken, mentions) => {
       if (!BrowserWindow.getFocusedWindow()) throw new Error('Messages are sent only from the WA Turbo window while it is in front.');
       const body = text.trim();
-      const photoPath = photoToken ? picked.get(photoToken) : undefined;
-      if (photoToken && !photoPath) throw new Error('Pick the photo again.');
-      if (!body && !photoPath) throw new Error('Type a message first.');
+      const photo = photoToken ? picked.get(photoToken) : undefined;
+      if (photoToken && !photo) throw new Error('Pick the photo again.');
+      if (!body && !photo) throw new Error('Type a message first.');
       if (body.length > 4096) throw new Error('That message is too long for WhatsApp. Split it in two.');
       const key = chatId + '\n' + body + '\n' + (photoToken ?? '');
       if (key === lastSend.key && Date.now() - lastSend.at < 3000) throw new Error('That message was just sent.');
       lastSend = { key, at: Date.now() };
       const c = await chatRef(chatId);
-      const image = photoPath ? await readPhoto(photoPath) : undefined;
-      const waId = await d.manager.send(c.account_id, c.jid, { text: body, image });
+      const tags = await checkMentions(c, body, mentions);
+      const image = photo ? ('path' in photo ? await readPhoto(photo.path) : photo) : undefined;
+      const waId = await d.manager.send(c.account_id, c.jid, { text: body, image, mentions: tags });
       if (photoToken) picked.delete(photoToken);
       if (image) {
         const id = await Q.messageIdByWa(c.id, waId);
@@ -217,8 +281,32 @@ export function registerIpc(d: RouterDeps): void {
       const img = nativeImage.createFromPath(path);
       if (img.isEmpty()) throw new Error(NOT_A_PHOTO);
       const token = randomUUID();
-      picked.set(token, path);
+      picked.set(token, { path });
       return { token, name: basename(path), size, preview: img.resize({ height: 120 }).toDataURL() };
+    },
+    pastePhoto: async (data, mime) => {
+      const p = pastedPhoto(data, mime);
+      const token = randomUUID();
+      picked.set(token, { buf: p.buf, mime: p.mime });
+      return { token, name: 'Pasted photo.' + extOf(p.mime), size: p.buf.length, preview: p.img.resize({ height: 120 }).toDataURL() };
+    },
+    groupMembers: async chatId => {
+      const c = await chatRef(chatId);
+      if (c.kind !== 'group') return [];
+      const list = (await d.manager.session(c.account_id)?.members(c.jid)) ?? [];
+      // Names: your contacts, else what WhatsApp told this session, else the name they used on their messages.
+      const jids = [...new Set(list.flatMap(m => [m.pn, m.id]))];
+      const [saved, spoke] = await Promise.all([Q.contactNames(c.account_id, jids), Q.senderNames(c.account_id, jids)]);
+      return list
+        .map(m => {
+          const phone = m.pn.endsWith('@s.whatsapp.net') ? formatPhone('+' + m.pn.split('@')[0]) : '';
+          const name = saved.get(m.pn) ?? saved.get(m.id) ?? m.name ?? spoke.get(m.pn) ?? spoke.get(m.id) ?? '';
+          return { jid: m.id, name: name || phone, phone, named: !!name };
+        })
+        .filter(m => m.name)
+        // People with a name first, then the ones known only by number.
+        .sort((a, b) => Number(b.named) - Number(a.named) || a.name.localeCompare(b.name))
+        .map(({ named: _, ...m }) => m);
     },
     saveMedia: async messageId => {
       const f = await loadMedia(Number(messageId));
@@ -302,14 +390,21 @@ export function registerIpc(d: RouterDeps): void {
       if (patch.openAtLogin !== undefined) app.setLoginItemSettings({ openAtLogin: patch.openAtLogin });
       const saved = await Q.saveSettings(patch);
       await notifier.apply(saved);
-      if (['autoOn', 'pinEveryMin', 'pinWindow', 'otherEveryMin', 'otherWindow'].some(k => k in patch)) await autoSummary.schedule();
+      if (['autoOn', 'pinEveryMin', 'pinWindow', 'otherEveryMin', 'otherWindow', 'provider', 'autoDailyBudget'].some(k => k in patch)) await autoSummary.schedule();
       return saved;
     },
     autoStatus: async () => autoSummary.status(),
-    checkAi: async () => {
-      forgetClaude();
-      const st = await aiStatus((await Q.getSettings()).provider);
-      if (st.connected) langDetect.poke(true);
+    checkAi: async deep => {
+      forgetClaude(); forgetAgy(); forgetCodex();
+      const s = await Q.getSettings();
+      if (deep && s.provider === 'antigravity' && (await findAgy())) {
+        try { await checkAgy(s.agyModel); } catch (e) {
+          const st = await aiStatus(s.provider);
+          return { ...st, connected: false, detail: e instanceof Error ? e.message : String(e) };
+        }
+      }
+      const st = await aiStatus(s.provider);
+      if (st.connected) { langDetect.poke(true); await autoSummary.schedule(); }
       return st;
     },
     testKey: async key => {
@@ -325,11 +420,38 @@ export function registerIpc(d: RouterDeps): void {
       }
     },
     disconnectKey: async () => { setApiKey(null); resetClient(); },
+    testProviderKey: async (provider, key) => {
+      try {
+        const s = await Q.getSettings();
+        const k = key?.trim() || getProviderKey(provider);
+        if (provider === 'gemini' && !k) throw new Error('Paste your Gemini key first.');
+        if (provider === 'openai' && !s.openaiBaseUrl) throw new Error('Enter the service address first, e.g. https://api.groq.com/openai/v1.');
+        if (provider === 'openai' && !s.openaiModel) throw new Error('Enter the model name first.');
+        await compatTest({ kind: provider, baseUrl: provider === 'gemini' ? GEMINI_BASE : s.openaiBaseUrl, key: k, model: provider === 'gemini' ? s.geminiModel || DEFAULT_MODELS.gemini : s.openaiModel });
+        if (key?.trim()) setProviderKey(provider, key.trim());
+        langDetect.poke(true);
+        await autoSummary.schedule();
+        return { ok: true, error: null };
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) };
+      }
+    },
+    disconnectProvider: async provider => { setProviderKey(provider, null); },
+    detectLocal: () => localModels.detect(),
+    aiDiagnostics: async provider => {
+      const s = await Q.getSettings();
+      const extra: Record<string, string> = { 'wa turbo': app.getVersion(), model: activeModel({ ...s, provider }) || '(default)' };
+      if (provider === 'antigravity') extra.cli = (await findAgy()) ?? 'not found';
+      if (provider === 'codex') extra.cli = (await findCodex()) ?? 'not found';
+      if (provider === 'local') { const f = await localModels.detect(); extra.ollama = f.running ? f.version ?? 'running' : 'not running'; extra.models = f.models.join(', '); }
+      extra.experimental = String(PROVIDERS[provider].experimental);
+      return diagText(provider, extra);
+    },
 
     summarize: async (chatId, opts) => {
       const s = await Q.getSettings();
       const result = await run('summary:' + chatId, signal =>
-        summarizeChat(chatId, s.model, { window: opts?.window ?? s.window, force: opts?.force }, 'summary:' + chatId, p => broadcast('progress', p), signal));
+        summarizeChat(chatId, activeModel(s), { window: opts?.window ?? s.window, force: opts?.force }, 'summary:' + chatId, p => broadcast('progress', p), signal));
       broadcast('loops-changed', await Q.listLoops());
       const c = await chatRef(chatId);
       broadcast('chats-changed', { acct: c.account_id });
@@ -352,7 +474,7 @@ export function registerIpc(d: RouterDeps): void {
     generateReport: async (presetId, days, chatIds, custom) => {
       const s = await Q.getSettings();
       if (presetId === 'custom' && custom.trim()) await Q.saveSettings({ customPrompt: custom.trim() });
-      const r = await run('report', signal => generateReport(presetId, days, chatIds, custom.trim(), s.model, 'report', p => broadcast('progress', p), signal));
+      const r = await run('report', signal => generateReport(presetId, days, chatIds, custom.trim(), activeModel(s), 'report', p => broadcast('progress', p), signal));
       broadcast('loops-changed', await Q.listLoops());
       return r;
     },
