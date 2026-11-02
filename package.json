@@ -2,7 +2,7 @@
   "name": "wa-turbo",
   "productName": "WA Turbo",
   "version": "0.3.0",
-  "description": "Multi-account WhatsApp reader with Claude summaries, reports and reply-debt tracking. Runs locally on macOS and Windows.",
+  "description": "Multi-account WhatsApp reader with AI summaries, reports and reply-debt tracking: Claude, other AI plans, a free Gemini key or a local model. Runs locally on macOS and Windows.",
   "private": true,
   "author": "Kevin Farel",
   "type": "module",

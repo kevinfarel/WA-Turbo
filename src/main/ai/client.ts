@@ -1,27 +1,26 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
-import type { ModelId } from '@shared/types';
-import { getApiKey } from '../config';
+import { modelLabel, splitModel } from '@shared/ai';
+import type { AiProvider, ModelId, Settings } from '@shared/types';
+import { getApiKey, getProviderKey } from '../config';
 import { getSettings, logRun } from '../db/queries';
+import { runAgy } from './antigravity';
 import { runClaudeCode, type ContentBlock } from './claude-code';
+import { runCodex } from './codex';
 import { AiError } from './errors';
+import { localModels } from './local';
+import { compatChat, GEMINI_BASE } from './openai-compat';
 
 export { AiError };
 
-export const MODEL_NAMES: Record<ModelId, string> = {
-  'claude-opus-5-5': 'Claude Opus 5.5',
-  'claude-sonnet-5-5': 'Claude Sonnet 5.5',
-  'claude-haiku-5-5': 'Claude Haiku 5.5',
-};
-
 // Haiku 5.5 has no server-side fallback; Opus and Sonnet retry a refused request on another model.
-const HAS_FALLBACK: Record<ModelId, boolean> = { 'claude-opus-5-5': true, 'claude-sonnet-5-5': true, 'claude-haiku-5-5': false };
+const hasFallback = (model: ModelId): boolean => model === 'claude-opus-5-5' || model === 'claude-sonnet-5-5';
 
 let cached: { key: string; client: Anthropic } | null = null;
 
 function client(key = getApiKey()): Anthropic {
-  if (!key) throw new AiError('Claude is not connected. Add your API key in AI setup.', 'no_key');
+  if (!key) throw new AiError('Claude is not connected. Add your API key in Settings → AI connection.', 'no_key');
   if (cached?.key !== key) cached = { key, client: new Anthropic({ apiKey: key, maxRetries: 2 }) };
   return cached.client;
 }
@@ -72,15 +71,79 @@ export interface StructuredCall<S extends z.ZodType> {
   chatId?: string;
 }
 
-const refusedMessage = (model: ModelId): string => HAS_FALLBACK[model]
+const refusedMessage = (model: ModelId): string => hasFallback(model)
   ? 'Claude declined this request. Try a different selection of messages.'
   : 'Claude Haiku 5.5 declined this request. Run it again on Sonnet 5.5 from Settings.';
 
-/** One structured Claude call: zod-validated output, refusal check, usage logged. Goes through
- *  Claude Code (the signed-in plan) or the API key, whichever AI setup has selected. */
+/** One structured AI call: zod-validated output, refusal check, usage logged. Goes through whichever
+ *  provider Settings has selected: Claude Code, the Anthropic key, or one of the others (viaOther). */
 export async function structured<S extends z.ZodType>(c: StructuredCall<S>): Promise<z.infer<S>> {
-  const { provider } = await getSettings();
-  return provider === 'api' ? viaApi(c) : viaClaudeCode(c);
+  const s = await getSettings();
+  if (s.provider === 'api') return viaApi(c);
+  if (s.provider === 'claude-code') return viaClaudeCode(c);
+  return viaOther(c, s);
+}
+
+/** What each of the other providers hands back: the parsed answer (or undefined) and its token counts. */
+interface OtherOut { output: unknown; input: number; outTokens: number; cacheRead: number; stop: string | null }
+
+const PROVIDER_NAME: Record<Exclude<AiProvider, 'claude-code' | 'api'>, string> = {
+  local: 'The local model', gemini: 'Gemini', openai: 'The AI service', antigravity: 'Antigravity', codex: 'Codex',
+};
+
+/** Photo labels written into the text, for providers that take the photos as a separate list. */
+function photoNote(images: AiImage[]): string {
+  return images.length ? 'Photos attached, in this order: ' + images.map(i => i.label.replace(/^Photo /, '')).join(', ') + '\n\n' : '';
+}
+
+async function runOther(c: StructuredCall<z.ZodType>, s: Settings, jsonSchema: object): Promise<OtherOut> {
+  const model = splitModel(c.model).name;
+  switch (s.provider) {
+    case 'local': {
+      const r = await localModels.chat({ model, system: c.system, text: photoNote(c.images ?? []) + c.user, images: (c.images ?? []).map(i => i.data), schema: jsonSchema, signal: c.signal });
+      let output: unknown;
+      try { output = JSON.parse(r.text); } catch { output = undefined; }
+      if (r.stop === 'length') throw new AiError('The answer was cut off. Pick fewer chats or a shorter window.', 'invalid_output');
+      return { output, input: r.input, outTokens: r.output, cacheRead: 0, stop: r.stop };
+    }
+    case 'gemini': case 'openai': {
+      const gemini = s.provider === 'gemini';
+      const key = getProviderKey(s.provider);
+      if (gemini && !key) throw new AiError('Gemini is not connected. Add your free key in Settings → AI connection.', 'no_key');
+      const r = await compatChat({ kind: s.provider, baseUrl: gemini ? GEMINI_BASE : s.openaiBaseUrl, key, model }, c.system, contentOf(c), jsonSchema, c.effort, c.signal);
+      let output: unknown;
+      try { output = JSON.parse(r.text); } catch { output = undefined; }
+      return { output, input: r.input, outTokens: r.output, cacheRead: r.cacheRead, stop: r.stop };
+    }
+    case 'antigravity':
+      return runAgy({ model, system: c.system, text: c.user, jsonSchema, effort: c.effort, signal: c.signal });
+    case 'codex':
+      return runCodex({ model, system: c.system, text: photoNote(c.images ?? []) + c.user, images: (c.images ?? []).map(i => ({ mime: i.mime, data: i.data })), jsonSchema, effort: c.effort, signal: c.signal });
+    default:
+      throw new AiError('Pick an AI connection in Settings.', 'no_key');
+  }
+}
+
+async function viaOther<S extends z.ZodType>(c: StructuredCall<S>, s: Settings): Promise<z.infer<S>> {
+  const who = PROVIDER_NAME[s.provider as keyof typeof PROVIDER_NAME] ?? 'The AI';
+  const jsonSchema = cliSchema(c.schema);
+  // Small local models now and then miss a field; one more try usually fixes it.
+  const tries = s.provider === 'local' ? 2 : 1;
+  for (let i = 1; ; i++) {
+    const started = Date.now();
+    try {
+      const r = await runOther(c, s, jsonSchema);
+      const out = c.schema.safeParse(r.output);
+      void logRun({ kind: c.kind, model: c.model, chatId: c.chatId, input: r.input, output: r.outTokens, cacheRead: r.cacheRead, stop: r.stop, ms: Date.now() - started,
+        error: out.success ? undefined : 'invalid output' }).catch(() => {});
+      if (out.success) return out.data as z.infer<S>;
+      if (i >= tries) throw new AiError(who + ' returned something WA Turbo could not read. Run it again' + (s.provider === 'local' ? ', or pick a bigger model in Settings.' : '.'), 'invalid_output');
+    } catch (e) {
+      const err = e instanceof AiError ? e : new AiError(e instanceof Error ? e.message : String(e), 'api');
+      if (err.code !== 'invalid_output' || !/could not read/.test(err.message)) void logRun({ kind: c.kind, model: c.model, chatId: c.chatId, ms: Date.now() - started, error: err.message }).catch(() => {});
+      throw err;
+    }
+  }
 }
 
 async function viaClaudeCode<S extends z.ZodType>(c: StructuredCall<S>): Promise<z.infer<S>> {
@@ -115,10 +178,10 @@ function cliSchema(schema: z.ZodType): object {
 
 function cliError(status: number | null, msg: string, model: ModelId): AiError {
   if (status === 401 || /\/login|not logged in|log ?in again|invalid api key|oauth/i.test(msg)) {
-    return new AiError('Claude Code is signed out. Open Terminal, run claude, type /login, then check again in AI setup.', 'no_key');
+    return new AiError('Claude Code is signed out. Open Terminal, run claude, type /login, then check again in Settings.', 'no_key');
   }
   if (status === 429 || /usage limit|limit reached|rate limit/i.test(msg)) return new AiError('Your Claude plan is at its usage limit. ' + msg, 'rate_limited');
-  if (status === 404 || status === 403) return new AiError(`Your Claude plan can't use ${MODEL_NAMES[model]} in Claude Code. Pick another model in AI setup.`, 'bad_key');
+  if (status === 404 || status === 403) return new AiError(`Your Claude plan can't use ${modelLabel(model)} in Claude Code. Pick another model in Settings.`, 'bad_key');
   if (status === null && /connect|network|ENOTFOUND|ECONNREFUSED|offline/i.test(msg)) return new AiError('Could not reach Anthropic. Check your internet connection.', 'offline');
   return new AiError('Claude Code returned an error' + (status ? ` (${status})` : '') + ': ' + msg, 'api');
 }
@@ -133,7 +196,7 @@ async function viaApi<S extends z.ZodType>(c: StructuredCall<S>): Promise<z.infe
         system: [{ type: 'text', text: c.system, cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: contentOf(c) }],
         output_config: { format: betaZodOutputFormat(c.schema), effort: c.effort },
-        ...(HAS_FALLBACK[c.model] ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const } : {}),
+        ...(hasFallback(c.model) ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const } : {}),
       },
       { signal: c.signal },
     );

@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import makeWASocket, {
   Browsers, BufferJSON, DisconnectReason, downloadMediaMessage, jidNormalizedUser, makeCacheableSignalKeyStore,
-  type AnyMessageContent, type ConnectionState, type Contact, type WAMessage, type WAMessageKey, type WASocket,
+  type AnyMessageContent, type ConnectionState, type Contact, type GroupParticipant, type WAMessage, type WAMessageKey, type WASocket,
 } from 'baileys';
 import pino from 'pino';
 import type { AccountStatus } from '@shared/types';
@@ -15,6 +15,8 @@ import { JidBook, isGroupJid, mapMessage, phoneOf, skipChat, type Identity } fro
 // It sends only what the person does by hand: a message they typed and pressed Send on, or an edit or
 // delete-for-everyone of their own message (send/edit/revoke below, all through out()).
 // No automatic, scheduled or AI-written messages, and no read receipts or presence.
+
+const MEMBERS_TTL = 10 * 60_000;
 
 const logger = pino({ level: process.env.WA_TURBO_DEBUG ? 'debug' : 'warn' });
 
@@ -35,6 +37,8 @@ export class WaSession extends EventEmitter<SessionEvents> {
   private book = new JidBook();
   private contactNames = new Map<string, string>();
   private groupNames = new Map<string, string>();
+  // Each group's members as WhatsApp addresses them (the ID a tag must use), refreshed when older than MEMBERS_TTL.
+  private groupMembers = new Map<string, { at: number; ids: string[] }>();
   status: AccountStatus = 'reconnecting';
 
   constructor(readonly accountId: string) {
@@ -61,11 +65,12 @@ export class WaSession extends EventEmitter<SessionEvents> {
     this.sock = null;
   }
 
-  /** Sends one message the person wrote: text, or a photo with an optional caption. Returns its WhatsApp id. */
-  async send(chatJid: string, body: { text: string; image?: { buf: Buffer; mime: string } }): Promise<string> {
+  /** Sends one message the person wrote: text, or a photo with an optional caption, tagging `mentions`. Returns its WhatsApp id. */
+  async send(chatJid: string, body: { text: string; image?: { buf: Buffer; mime: string }; mentions?: string[] }): Promise<string> {
+    const tags = body.mentions?.length ? { mentions: body.mentions } : {};
     const content = body.image
-      ? { image: body.image.buf, mimetype: body.image.mime, ...(body.text ? { caption: body.text } : {}) }
-      : { text: body.text };
+      ? { image: body.image.buf, mimetype: body.image.mime, ...(body.text ? { caption: body.text } : {}), ...tags }
+      : { text: body.text, ...tags };
     const sent = await this.out(chatJid, content);
     if (!sent?.key.id) throw new Error('WhatsApp did not accept the message. Try again.');
     await this.store([sent], true);
@@ -87,6 +92,41 @@ export class WaSession extends EventEmitter<SessionEvents> {
     const sock = this.sock;
     if (!sock || this.status !== 'online') throw new Error('This number is not connected right now. Wait until it is back online.');
     return sock.sendMessage(jid, content);
+  }
+
+  /**
+   * The people in a group other than you: the ID to tag them with, their phone-number ID when known,
+   * and the name WhatsApp gave us. A read query, asked again when the list is older than 10 minutes.
+   */
+  async members(groupJid: string): Promise<{ id: string; pn: string; name: string | null }[]> {
+    let cached = this.groupMembers.get(groupJid);
+    if (this.sock && this.status === 'online' && (!cached || Date.now() - cached.at > MEMBERS_TTL)) {
+      try {
+        const g = await this.sock.groupMetadata(groupJid);
+        this.learnMembers(g.id, g.participants);
+        cached = this.groupMembers.get(groupJid);
+      } catch (e) {
+        logger.warn({ err: e }, 'group members fetch failed');
+      }
+    }
+    // Members WhatsApp lists by LID only: look up their phone number locally, as message senders are.
+    await this.resolveLids(cached?.ids ?? []);
+    const mine = [this.me.pn, this.me.lid];
+    return (cached?.ids ?? [])
+      .map(id => ({ id, pn: this.book.canonical(id) }))
+      .filter(m => !mine.includes(m.id) && !mine.includes(m.pn))
+      .map(m => ({ ...m, name: this.contactNames.get(m.pn) ?? null }));
+  }
+
+  private learnMembers(groupJid: string, participants: GroupParticipant[]): void {
+    // Members come with both IDs, so history-sync messages (LID only) can be named after their phone number.
+    for (const p of participants) {
+      this.book.learn(p.lid ?? (p.id.endsWith('@lid') ? p.id : null), p.phoneNumber ?? (p.id.endsWith('@s.whatsapp.net') ? p.id : null));
+      const pn = this.book.canonical(p.id, p.phoneNumber);
+      const nm = p.name || p.notify || p.verifiedName;
+      if (nm && !this.contactNames.has(pn)) this.contactNames.set(pn, nm);
+    }
+    this.groupMembers.set(groupJid, { at: Date.now(), ids: participants.map(p => jidNormalizedUser(p.id)) });
   }
 
   /** The other ID (LID or phone number) of someone in your chats, when WhatsApp has told us. */
@@ -201,13 +241,7 @@ export class WaSession extends EventEmitter<SessionEvents> {
     const groups = await sock.groupFetchAllParticipating();
     for (const g of Object.values(groups)) {
       if (g.subject) this.groupNames.set(g.id, g.subject);
-      // Members come with both IDs, so history-sync messages (LID only) can be named after their phone number.
-      for (const p of g.participants) {
-        this.book.learn(p.lid ?? (p.id.endsWith('@lid') ? p.id : null), p.phoneNumber ?? (p.id.endsWith('@s.whatsapp.net') ? p.id : null));
-        const pn = this.book.canonical(p.id, p.phoneNumber);
-        const nm = p.name || p.notify || p.verifiedName;
-        if (nm && !this.contactNames.has(pn)) this.contactNames.set(pn, nm);
-      }
+      this.learnMembers(g.id, g.participants);
       await upsertChat(null, this.accountId, g.id, 'group', g.subject || null);
       await setChatSubtitle(this.accountId, g.id, `${g.participants.length} members`);
     }

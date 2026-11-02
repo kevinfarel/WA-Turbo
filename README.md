@@ -1,23 +1,23 @@
 # WA Turbo
 
-A desktop app that links several WhatsApp numbers on one computer and uses Claude to summarize chats, write reports and track who is still waiting for a reply (SUM UP!, beta). Everything runs locally: chats are stored in a PostgreSQL database built into the app, and nothing goes to a WA Turbo server, because there isn't one.
+A desktop app that links several WhatsApp numbers on one computer and uses AI to summarize chats, write reports and track who is still waiting for a reply (SUM UP!, beta). The AI can be Claude (your Claude plan or an API key), a model you already run with Ollama (Qwen, Gemma and so on, detected automatically), a free Gemini key, any OpenAI-compatible service, or, experimentally, your ChatGPT (Codex) or Google (Antigravity) plan. Everything runs locally: chats are stored in a PostgreSQL database built into the app, and nothing goes to a WA Turbo server, because there isn't one.
 
 Current release: see [CHANGELOG.md](CHANGELOG.md). Runs on macOS (Apple Silicon) and Windows 10/11 (x64).
 
 ## What it does
 
 - **Several numbers, one window.** Each number links as a WhatsApp linked device (Baileys, one connection per number) with its own session keys.
-- **Summaries and reports.** Claude reads the messages you pick and returns a summary, actions, decisions and open questions, citing the messages it used.
-- **SUM UP! (beta).** Local rules and Claude find questions and promises still waiting for an answer, on your side or theirs, with response-time clocks.
+- **Summaries and reports.** The AI reads the messages you pick and returns a summary, actions, decisions and open questions, citing the messages it used.
+- **SUM UP! (beta).** Local rules and the AI find questions and promises still waiting for an answer, on your side or theirs, with response-time clocks.
 - **Pinned chats** are summarized automatically; other chats are checked for open loops.
 - **Notifications**, a menu bar count of pinned chats waiting on you, per-chat mute in WA Turbo.
 - **My team**: people on your side in group chats.
-- **Claude usage** per number, by day and week.
+- **AI usage** per number, by day and week.
 
 ### Ground rules
 
 - **Only your own hand sends.** Messages, photos, edits and delete-for-everyone go out only when you press Send/Save or confirm. No automatic, scheduled, rule-driven or AI-written sends, no read receipts, no presence. `scripts/check-send.mjs` enforces this and runs before every build.
-- **Local by default.** Claude only sees what a summary or report includes, phone numbers in the text are swapped for aliases first, and photos go only if "Let Claude see photos" is on.
+- **Local by default.** The AI only sees what a summary or report includes, phone numbers in the text are swapped for aliases first, and photos go only if "Let the AI see photos" is on. With "Local model" nothing leaves the machine at all.
 - **No sample content** in the app: no demo names in copy, prompts, placeholders or seed data.
 
 ## Requirements
@@ -26,7 +26,7 @@ Current release: see [CHANGELOG.md](CHANGELOG.md). Runs on macOS (Apple Silicon)
 |---|---|
 | Machine | macOS 13+ on Apple Silicon, or Windows 10/11 x64 |
 | Node | 22.12 or newer (`.nvmrc`). With Homebrew: `PATH=/opt/homebrew/opt/node@22/bin:$PATH` |
-| Claude | Claude Code installed and signed in with a Claude plan (default), or an Anthropic API key in Settings |
+| AI | One of: Claude Code signed in with a Claude plan (default); an Anthropic API key; a model you run with Ollama (found on 127.0.0.1:11434); a free Gemini key; an OpenAI-compatible address; or, experimental, the Codex CLI (ChatGPT Plus+) or Antigravity CLI (Google account) signed in |
 | Database | None to install: PostgreSQL 18 ships inside the app |
 
 ## Getting started
@@ -88,7 +88,9 @@ src/main/          Electron main process
   wa/              One Baileys session per number, mappers, auth state in Postgres
   ingest/          Writing WhatsApp events to the database
   loops/           SUM UP! local rules and loop service
-  ai/              Claude: context, redaction, prompts, schemas, summarize, report, auto summary
+  ai/              AI: providers (client.ts routes to Claude Code, API key, Ollama models local.ts,
+                   OpenAI-compatible, Codex, Antigravity), context, redaction, prompts, schemas,
+                   summarize, report, auto summary
   notify/          Notifications, badge, menu bar icon (never on the send path)
   ipc/router.ts    Every call the window can make
 src/preload/       window.api bridge (context isolation on, sandboxed)
@@ -97,7 +99,7 @@ src/shared/        Types and helpers used by both sides
 migrations/        NNN_name.sql, applied in order on start, each once
 scripts/           Send guard, Postgres preparation
 tests/unit/        Vitest
-tests/e2e/         Playwright screenshots of the running or packaged app
+tests/e2e/         Playwright screenshots of the running or packaged app; ai-local.mjs checks Local model end to end (needs Ollama running)
 build/             App icon
 ```
 

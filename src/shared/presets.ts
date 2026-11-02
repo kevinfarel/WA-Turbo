@@ -1,4 +1,4 @@
-import type { ModelId, PresetId } from './types';
+import type { PresetId } from './types';
 
 export const PRESETS: { id: PresetId; name: string; blurb: string }[] = [
   { id: 'digest', name: 'Daily digest', blurb: 'Narrative summary, highlights, actions and open questions.' },
@@ -12,8 +12,3 @@ export const PRESETS: { id: PresetId; name: string; blurb: string }[] = [
 /** Summarize on "This week" with nothing since Monday 00:00; the panel offers the last 50 instead. */
 export const EMPTY_WEEK = 'No messages since Monday.';
 
-export const MODEL_LABEL: Record<ModelId, string> = {
-  'claude-opus-5-5': 'Claude Opus 5.5',
-  'claude-sonnet-5-5': 'Claude Sonnet 5.5',
-  'claude-haiku-5-5': 'Claude Haiku 5.5',
-};

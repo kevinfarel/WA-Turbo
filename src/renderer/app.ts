@@ -3,16 +3,18 @@
 // The only send in this file is sendFromComposer(): what you typed, when you press Send or Enter.
 
 import type { Bridge, PickedPhoto } from '@shared/ipc';
-import type { ContactImportPreview, ContactSource, ContactsInfo, DbInfo,
-  Account, Accent, AiProvider, AiStatus, AutoStatus, ChatInsight, ChatSummaryRow, Loop, Message, ModelId, PairState, Partner, PresetId, Report, RunProgress, Settings, SummaryResult, TeamMember, UsageBucket,
+import type { ContactImportPreview, ContactSource, ContactsInfo, DbInfo, GroupMember,
+  Account, Accent, AiProvider, AiStatus, AutoStatus, ChatInsight, ChatSummaryRow, ClaudeModel, LocalFound, Loop, Message, PairState, Partner, PresetId, Report, RunProgress, Settings, SummaryResult, TeamMember, UsageBucket,
 } from '@shared/types';
 import { fmtDur, loopAge, loopPending, loopSla, setDurLang, SLA_LABEL, SLA_ORDER } from '@shared/sla';
-import { EMPTY_WEEK, MODEL_LABEL, PRESETS } from '@shared/presets';
+import { EMPTY_WEEK, PRESETS } from '@shared/presets';
+import { encodeMentions, type PickedMention } from '@shared/mentions';
+import { activeModel, FREE_CAP, isClaude, modelLabel, PROVIDERS } from '@shared/ai';
 import { esc, fmtText } from './format';
 import { weekStart } from '@shared/week';
 import { WIN_SOUND_LABEL, WIN_SOUNDS, winSound } from '@shared/sounds';
 import { HERE, IS_WIN, toWindows } from './platform';
-import { lang, locale, setLang, startTranslating } from './i18n';
+import { lang, locale, setLang, startTranslating, tr } from './i18n';
 import { applyTheme, isDark, onThemeChange, setMode, setTheme, THEMES, themeColours, themeFor, themeMode, toggleDark } from './theme';
 
 // Theme and language go on before anything is drawn; the window stays blank until then (themes.css).
@@ -109,6 +111,10 @@ const state = {
   settings: { provider: 'claude-code', model: 'claude-haiku-5-5', window: 'week', customPrompt: '', openAtLogin: false, aiImages: true, autoOn: true, pinEveryMin: 5, pinWindow: 10, otherEveryMin: 60, otherWindow: 2 } as Settings,
   drafts: new Map<string, string>(),
   photo: null as (PickedPhoto & { chatId: string }) | null,
+  // @ tags: each group's members (fetched on the first "@"), the people tagged in each chat's draft, and the open list.
+  members: new Map<string, { at: number; list: GroupMember[] }>(),
+  tags: new Map<string, PickedMention[]>(),
+  mention: null as null | { chatId: string; start: number; query: string; idx: number },
   sending: false,
   editing: null as null | { msgId: string; text: string },
   team: [] as TeamMember[],
@@ -120,6 +126,7 @@ const state = {
   dbPwShown: false,
   dbBusy: false,
   auto: null as AutoStatus | null,
+  localFound: null as LocalFound | null,
   ai: { provider: 'claude-code', connected: false, testing: false, cliFound: false, account: null } as AiStatus,
   summary: { chatId: null, running: false, progress: null, result: null, error: null } as Summary,
   reports: [] as Report[],
@@ -148,7 +155,7 @@ const loopsOf = (chatId: string, dir?: string) => state.loops.filter(l => l.stat
 const sla = (l: Loop) => loopSla(l, now());
 const age = (l: Loop) => loopAge(l, now());
 const pending = (l: Loop) => loopPending(l, now());
-const model = () => state.settings.model as ModelId;
+const model = () => activeModel(state.settings);
 
 function visibleChats(): ChatSummaryRow[] {
   const q = state.q.trim().toLowerCase();
@@ -405,7 +412,7 @@ function renderConvo(): void {
   const host = $('#convo');
   const c = chatById(state.chat);
   if (!c) {
-    host.innerHTML = '<div></div><div class="empty"><span class="glyph">' + icon('inbox', 20) + '</span><h3>No conversation open</h3><p>Pick a chat on the left to read it and summarize it with Claude.</p></div>';
+    host.innerHTML = '<div></div><div class="empty"><span class="glyph">' + icon('inbox', 20) + '</span><h3>No conversation open</h3><p>Pick a chat on the left to read it and summarize it with AI.</p></div>';
     return;
   }
   const a = acctById(c.acct);
@@ -433,7 +440,7 @@ function renderConvo(): void {
             '<div class="edit-acts"><span class="od-fill hint">Enter to save · Shift+Enter for a new line · Esc to cancel</span>' +
             '<button type="button" class="btn btn-sm" id="editCancel">Cancel</button>' +
             '<button type="button" class="btn btn-sm btn-primary" id="editSave">Save</button></div></div>'
-        : m.text ? '<span class="tx" translate="no">' + fmtText(m.text) + '</span>' : '') +
+        : m.text ? '<span class="tx" translate="no">' + fmtText(m.text, shownMentions(m)) + '</span>' : '') +
       mediaFigure(m) +
       '<div class="mt-row">' + tools +
         '<button type="button" class="icon-btn mmore" data-msgmenu="' + m.id + '" title="More" aria-label="Message options">' + icon('more', 15) + '</button>' +
@@ -492,14 +499,15 @@ function renderConvo(): void {
       : '') +
     '<div class="thread" id="thread">' + body + '</div>' +
     '<div class="composer-wrap">' +
+      '<div class="mention-pop" id="mentionPop" role="listbox" aria-label="People to tag" hidden></div>' +
       (photo
         ? '<div class="attach-chip"><img src="' + photo.preview + '" alt=""><span class="od-fill od-truncate">' + esc(photo.name) + ' · ' + fmtBytes(photo.size) + '</span>' +
             '<button type="button" class="icon-btn" id="attachClear" aria-label="Remove photo">' + icon('trash', 14) + '</button></div>'
         : '') +
       '<div class="composer">' +
-        '<button type="button" class="icon-btn" id="attachBtn" title="Send a photo" aria-label="Send a photo"' + (online ? '' : ' disabled') + '>' + icon('clip', 17) + '</button>' +
+        '<button type="button" class="icon-btn" id="attachBtn" title="Send a photo (or paste one)" aria-label="Send a photo"' + (online ? '' : ' disabled') + '>' + icon('clip', 17) + '</button>' +
         '<label class="od-fill"><span class="vh">Message ' + esc(c.name) + '</span>' +
-          '<textarea id="composer" rows="1" placeholder="' + (online ? (photo ? 'Add a caption…' : 'Write a message… (Shift+Enter for a new line)') : 'This number is offline. You can send once it reconnects.') + '"' +
+          '<textarea id="composer" rows="1" placeholder="' + (online ? (photo ? 'Add a caption…' : c.kind === 'group' ? 'Write a message… (@ to tag, Shift+Enter for a new line)' : 'Write a message… (Shift+Enter for a new line)') : 'This number is offline. You can send once it reconnects.') + '"' +
             (online ? '' : ' disabled') + '>' + esc(draft) + '</textarea></label>' +
         '<button type="button" class="send" id="sendBtn" aria-label="Send message"' + (online && (draft.trim() || photo) && !state.sending ? '' : ' disabled') + '>' + icon('send', 16) + '</button>' +
       '</div>' +
@@ -512,6 +520,7 @@ function renderConvo(): void {
     fitComposer(ta);
     if (typing) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
   }
+  renderMentionPop();
   const eb = document.getElementById('editBox') as HTMLTextAreaElement | null;
   if (eb) {
     fitComposer(eb, 240);
@@ -538,8 +547,10 @@ async function sendFromComposer(): Promise<void> {
   const btn = document.getElementById('sendBtn') as HTMLButtonElement | null;
   if (btn) btn.disabled = true;
   try {
-    await api.sendMessage(c.id, text, photo?.token ?? null);
+    const tagged = encodeMentions(text, state.tags.get(c.id) ?? []);
+    await api.sendMessage(c.id, tagged.text, photo?.token ?? null, tagged.jids);
     state.drafts.delete(c.id);
+    state.tags.delete(c.id);
     if (photo) state.photo = null;
     if (ta) ta.value = '';
   } catch (e) {
@@ -556,6 +567,107 @@ async function attachPhoto(): Promise<void> {
     const p = await api.pickPhoto();
     if (p) { state.photo = { ...p, chatId: c.id }; renderConvo(); document.getElementById('composer')?.focus(); }
   } catch (e) { fail(e); }
+}
+
+async function pastePhoto(file: File): Promise<void> {
+  const c = chatById(state.chat); if (!c) return;
+  try {
+    const p = await api.pastePhoto(new Uint8Array(await file.arrayBuffer()), file.type);
+    state.photo = { ...p, chatId: c.id }; renderConvo(); document.getElementById('composer')?.focus();
+  } catch (e) { fail(e); }
+}
+
+/* ============ @ tags ============ */
+// Typing "@" in a group lists its members; picking one writes "@Name", which goes out as a WhatsApp tag.
+const MEMBERS_TTL = 10 * 60_000;
+
+/** A message's tags with "You" in the app language. */
+function shownMentions(m: Message): Record<string, string> | undefined {
+  if (!m.mentions) return undefined;
+  return Object.fromEntries(Object.entries(m.mentions).map(([tok, name]) => [tok, name === 'You' ? tr('You') : name]));
+}
+
+function mentionMatches(): GroupMember[] {
+  const m = state.mention;
+  if (!m) return [];
+  const q = m.query.toLowerCase();
+  const digits = q.replace(/\D/g, '').replace(/^0/, ''); // 0812… finds +62 812…
+  return (state.members.get(m.chatId)?.list ?? [])
+    .filter(p => p.name.toLowerCase().includes(q) || (digits.length >= 3 && p.phone.replace(/\D/g, '').includes(digits)))
+    .slice(0, 50);
+}
+
+function renderMentionPop(): void {
+  const pop = document.getElementById('mentionPop');
+  if (!pop) return;
+  const m = state.mention;
+  const list = m?.chatId === state.chat ? mentionMatches() : [];
+  if (!m || !list.length) { pop.hidden = true; pop.innerHTML = ''; return; }
+  m.idx = Math.min(m.idx, list.length - 1);
+  pop.hidden = false;
+  pop.innerHTML = list.map((p, i) =>
+    '<button type="button" class="mention-opt" role="option" data-mention-pick="' + i + '" aria-selected="' + (i === m.idx) + '">' +
+      '<span class="av" aria-hidden="true">' + esc(initials(p.name)) + '</span>' +
+      '<span class="od-fill od-truncate" translate="no">' + esc(p.name) + '</span>' +
+      (p.phone && p.phone !== p.name ? '<span class="kv od-nowrap" translate="no">' + esc(p.phone) + '</span>' : '') +
+    '</button>').join('');
+  pop.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+}
+
+/** Opens, narrows or closes the list from the text just before the cursor. */
+function syncMention(ta: HTMLTextAreaElement): void {
+  const c = chatById(state.chat);
+  const before = ta.value.slice(0, ta.selectionStart);
+  const hit = c?.kind === 'group' && ta.selectionStart === ta.selectionEnd ? /(?:^|\s)@([^@\n]{0,30})$/.exec(before) : null;
+  if (!c || !hit) {
+    if (state.mention) { state.mention = null; renderMentionPop(); }
+    return;
+  }
+  const start = before.length - hit[1].length - 1;
+  const idx = state.mention?.chatId === c.id && state.mention.start === start ? state.mention.idx : 0;
+  state.mention = { chatId: c.id, start, query: hit[1], idx };
+  const cached = state.members.get(c.id);
+  if (!cached || Date.now() - cached.at > MEMBERS_TTL) {
+    state.members.set(c.id, { at: Date.now(), list: cached?.list ?? [] });
+    void api.groupMembers(c.id)
+      .then(list => { state.members.set(c.id, { at: Date.now(), list }); renderMentionPop(); })
+      .catch(e => { state.members.delete(c.id); fail(e); });
+  }
+  renderMentionPop();
+}
+
+function pickMention(i: number): void {
+  const ta = document.getElementById('composer') as HTMLTextAreaElement | null;
+  const m = state.mention;
+  const p = mentionMatches()[i];
+  if (!ta || !m || !p) return;
+  const tag = '@' + p.name + ' ';
+  ta.value = ta.value.slice(0, m.start) + tag + ta.value.slice(ta.selectionStart);
+  const at = m.start + tag.length;
+  ta.focus();
+  ta.setSelectionRange(at, at);
+  const tags = state.tags.get(m.chatId) ?? [];
+  if (!tags.some(t => t.jid === p.jid)) tags.push({ name: p.name, jid: p.jid });
+  state.tags.set(m.chatId, tags);
+  state.drafts.set(m.chatId, ta.value);
+  state.mention = null;
+  renderMentionPop();
+  fitComposer(ta);
+  const sb = document.getElementById('sendBtn') as HTMLButtonElement | null;
+  if (sb) sb.disabled = state.sending || !(ta.value.trim() || state.photo?.chatId === m.chatId);
+}
+
+/** Arrow keys move through the open list, Enter or Tab picks, Escape closes. True when the key was used. */
+function mentionKey(e: KeyboardEvent): boolean {
+  const m = state.mention;
+  const n = m ? mentionMatches().length : 0;
+  if (!m || !n || e.isComposing) return false;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { m.idx = (m.idx + (e.key === 'ArrowDown' ? 1 : n - 1)) % n; renderMentionPop(); }
+  else if (e.key === 'Enter' || e.key === 'Tab') pickMention(m.idx);
+  else if (e.key === 'Escape') { state.mention = null; renderMentionPop(); }
+  else return false;
+  e.preventDefault();
+  return true;
 }
 
 async function saveMedia(id: string): Promise<void> {
@@ -578,15 +690,15 @@ function renderPanel(): void {
   const body = $('#panelBody');
   const chip = $('#aiChip');
   chip.dataset.on = String(state.ai.connected);
-  $('#aiChipLabel').textContent = state.ai.connected ? MODEL_LABEL[model()] + ' connected' : 'Claude not connected';
-  $('#panelModel').textContent = state.ai.connected ? MODEL_LABEL[model()] : 'Offline';
+  $('#aiChipLabel').textContent = state.ai.connected ? modelLabel(model()) + ' connected' : 'AI not connected';
+  $('#panelModel').textContent = state.ai.connected ? modelLabel(model()) : 'Offline';
 
   if (!state.ai.connected) {
     body.innerHTML =
       '<div class="card"><div class="od-row" style="--od-gap:9px;margin-bottom:8px">' +
         '<span class="av" style="width:30px;height:30px;border-radius:8px;background:var(--brand)" aria-hidden="true">' + icon('key', 15) + '</span>' +
-        '<h3 class="od-fill">Connect Claude</h3></div>' +
-        '<p class="card-note">Summaries and reports need Claude: sign in to Claude Code on ' + HERE + ' (uses your Claude plan) or add an API key. Nothing is sent anywhere until you connect.</p>' +
+        '<h3 class="od-fill">Connect an AI</h3></div>' +
+        '<p class="card-note">Summaries and reports need an AI. Pick one in Settings: your Claude, ChatGPT or Google plan, a free AI that runs on ' + HERE + ', or a key. Nothing is sent anywhere until you connect.</p>' +
         '<div class="od-row" style="--od-gap:8px;margin-top:11px"><button type="button" class="btn btn-primary btn-sm" data-go="settings">Open Settings</button></div>' +
       '</div>' +
       '<div class="card"><h3>What you get</h3><ul class="bullets" style="margin-top:8px">' +
@@ -628,9 +740,9 @@ function renderPanel(): void {
         '<h3 class="od-fill od-truncate" translate="no">' + esc(c.name) + '</h3>' +
         '<span class="kv od-nowrap">' + esc(sm.result.msgCount + ' msgs') + '</span></div>' +
         '<p style="font-size:13px;color:var(--ink-2);line-height:1.6" translate="no">' + esc(r.summary) + '</p>' +
-        '<p class="kv" style="margin-top:9px">' + esc([MODEL_LABEL[sm.result.model], windowLabel(sm.result.windowKey), whenShort(sm.result.createdAt),
+        '<p class="kv" style="margin-top:9px">' + esc([modelLabel(sm.result.model), windowLabel(sm.result.windowKey), whenShort(sm.result.createdAt),
           sm.result.skipped ? sm.result.skipped + ' earlier this week left out' : ''].filter(Boolean).join(' · ')) + '</p>' +
-        (sm.result.cached ? '<p class="kv" style="margin-top:4px">No new messages since then, so Claude was not called. Run again to read it fresh.</p>' : '') +
+        (sm.result.cached ? '<p class="kv" style="margin-top:4px">No new messages since then, so the AI was not called. Run again to read it fresh.</p>' : '') +
       '</div>' +
       (debt.length ? '<div class="card sum-block"><h4>Reply debt detected · ' + debt.length + '</h4>' +
         debt.map(l =>
@@ -663,7 +775,7 @@ function renderPanel(): void {
 
   body.innerHTML =
     '<div class="card"><h3>Summarize this chat</h3>' +
-      '<p class="card-note">' + esc(c.msgCount + ' messages in “' + c.name + '”. Claude reads ' + windowText() + ', and returns a summary with action items.') + '</p>' +
+      '<p class="card-note">' + esc(c.msgCount + ' messages in “' + c.name + '”. The AI reads ' + windowText() + ', and returns a summary with action items.') + '</p>' +
       '<div class="od-row" style="--od-gap:8px;margin-top:11px"><button type="button" class="btn btn-primary btn-sm" id="runSummary">' + icon('bolt', 14) + 'Summarize now</button></div>' +
       '<p class="kv" style="margin-top:10px">' + (state.settings.aiImages ? 'Reads text and the 10 most recent photos; voice notes and files are never read.' : 'Text only — photos, voice notes and files stay in the chat but are never read.') + ' <button type="button" class="linkbtn" data-faq>What is sent?</button></p>' +
     '</div>' +
@@ -739,7 +851,7 @@ function loopRow(l: Loop): string {
       '<div class="od-cluster" style="--od-gap:6px">' +
         '<span class="dirtag" data-d="' + l.dir + '">' + icon(owed ? 'reply' : 'hour', 11) + (owed ? 'You owe them' : 'Waiting on them') + '</span>' +
         '<span class="kindtag">' + esc(LOOP_KIND[l.kind] || l.kind) + '</span>' +
-        (l.source === 'rule' ? '<span class="kindtag auto">auto · local rule</span>' : l.source === 'ai' ? '<span class="kindtag auto">found by Claude</span>' : '') +
+        (l.source === 'rule' ? '<span class="kindtag auto">auto · local rule</span>' : l.source === 'ai' ? '<span class="kindtag auto">found by AI</span>' : '') +
       '</div>' +
       '<p class="loop-q" translate="no">' + esc(l.topic) + '</p>' +
       '<p class="loop-meta">' +
@@ -846,7 +958,7 @@ function renderReportsList(): void {
   const n = state.reports.length;
   $('#repCount').textContent = n === 0 ? 'No reports yet' : n + (n === 1 ? ' report' : ' reports') + ' saved locally';
   if (!n) {
-    rows.innerHTML = '<div class="empty"><span class="glyph">' + icon('doc', 20) + '</span><h3>No reports yet</h3><p>Pick a few chats, choose a report type, and Claude turns them into a brief you can export.</p></div>';
+    rows.innerHTML = '<div class="empty"><span class="glyph">' + icon('doc', 20) + '</span><h3>No reports yet</h3><p>Pick a few chats, choose a report type, and the AI turns them into a brief you can export.</p></div>';
     return;
   }
   rows.innerHTML = state.reports.map(r =>
@@ -928,7 +1040,7 @@ function renderReportDoc(): void {
     }).join('') + '</div></div>';
   };
   const overviewSec = () => '<div class="sec"><h2>Overview</h2><p translate="no">' + esc(r.overview) + '</p>' +
-    '<p class="src">' + icon('bolt', 12) + esc(MODEL_LABEL[r.model] + ' · ' + r.stats.msgs + ' messages read · ' + RANGE_LABEL[r.days]) + '</p></div>';
+    '<p class="src">' + icon('bolt', 12) + esc(modelLabel(r.model) + ' · ' + r.stats.msgs + ' messages read · ' + RANGE_LABEL[r.days]) + '</p></div>';
 
   let secs: string;
   if (!byChat.length) secs = '<div class="sec"><h2>Overview</h2><p style="color:var(--ink-3)">None of the selected chats had messages in the ' + esc(RANGE_LABEL[r.days]) + '. Widen the window and run it again.</p></div>';
@@ -944,7 +1056,7 @@ function renderReportDoc(): void {
     '<button type="button" class="icon-btn mob-back" id="repBack" aria-label="Back to report list">' + icon('back', 18) + '</button>' +
     '<h1>' + esc(r.title) + '</h1>' +
     '<div class="doc-meta"><span>' + esc(d.toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short' }) + ', ' + clock(r.createdAt)) + '</span>' +
-      '<span>' + esc(RANGE_LABEL[r.days]) + '</span><span>' + esc(MODEL_LABEL[r.model]) + '</span></div>' +
+      '<span>' + esc(RANGE_LABEL[r.days]) + '</span><span>' + esc(modelLabel(r.model)) + '</span></div>' +
     '<div class="stats">' + (r.presetId === 'debt'
       ? stat(r.stats.owed, 'on your reply') + stat(r.stats.waiting, 'on the other side') + stat(r.stats.overdue, 'past SLA') + stat(r.stats.longestH ? fmtDur(r.stats.longestH) : '—', 'longest open')
       : stat(r.stats.chats, 'chats read') + stat(r.stats.msgs, 'messages') + stat(r.stats.actions, 'action items') + stat(r.stats.questions, 'open questions')) + '</div>' +
@@ -960,7 +1072,7 @@ const stat = (n: number | string, c: string) => '<div class="stat od-stat"><span
 
 function reportMarkdown(r: Report): string {
   const L: string[] = [];
-  const mname = MODEL_LABEL[r.model];
+  const mname = modelLabel(r.model);
   L.push('# ' + r.title, '');
   L.push('*' + new Date(r.createdAt).toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + ', ' + clock(r.createdAt) + ' · ' + RANGE_LABEL[r.days] + ' · ' + mname + '*', '');
   if (r.presetId === 'debt') L.push('- Waiting on your reply: ' + r.stats.owed, '- Waiting on the other side: ' + r.stats.waiting, '- Past SLA: ' + r.stats.overdue, '- Longest open loop: ' + (r.stats.longestH ? fmtDur(r.stats.longestH) : 'none'), '');
@@ -1016,15 +1128,20 @@ function renderSettings(): void {
   const pins = state.chats.filter(c => c.pinned).length;
   $('#autoPinned').textContent = pins ? pins + ' pinned' : 'No pinned chats yet';
   renderAutoState();
-  const cc = state.settings.provider !== 'api';
-  $$<HTMLInputElement>('input[name="provider"]').forEach(r => { r.checked = r.value === state.settings.provider; });
-  $('#ccBox').hidden = !cc;
-  $('#keyBox').hidden = cc;
+  const prov = state.settings.provider;
+  const cc = prov === 'claude-code';
+  $$<HTMLInputElement>('input[name="provider"]').forEach(r => { r.checked = r.value === prov; });
+  (Object.entries(BOXES) as [AiProvider, string][]).forEach(([k, sel]) => { $(sel).hidden = k !== prov; });
+  $('#claudeModelRow').hidden = !isClaude(prov);
+  $('#otherModelNote').hidden = isClaude(prov);
+  renderProviderBox();
+  renderLocalFound();
   const ccOn = cc && state.ai.provider === 'claude-code' && state.ai.connected;
   $('#ccState').textContent = state.ai.testing ? 'Checking…' : ccOn ? 'Connected' : 'Not connected';
   $('#ccAccount').textContent = state.ai.account ?? 'your Claude account';
   $('#ccOk').hidden = !ccOn;
   $('#ccSignedOut').hidden = !cc || state.ai.testing || ccOn || !state.ai.cliFound;
+  // (the API key box below only applies when prov === 'api')
   $('#ccMissing').hidden = !cc || state.ai.testing || ccOn || state.ai.cliFound;
   const ck = $<HTMLButtonElement>('#checkCc');
   ck.textContent = state.ai.testing ? 'Checking…' : 'Check again';
@@ -1058,7 +1175,7 @@ function renderLangList(): void {
   const host = $('#langList');
   if (!state.accounts.length) { host.innerHTML = '<li><span class="kv">Link a number first. Its language is picked from its first conversations.</span></li>'; return; }
   host.innerHTML = state.accounts.map(a => {
-    const note = !a.lang ? (state.ai.connected ? 'Not picked yet · detecting from its first 10 conversations' : 'Not picked yet · detected once Claude is connected; English until then')
+    const note = !a.lang ? (state.ai.connected ? 'Not picked yet · detecting from its first 10 conversations' : 'Not picked yet · detected once an AI is connected; English until then')
       : a.langDetected ? 'Detected from its first conversations' : 'Picked by you';
     return '<li><span class="av" aria-hidden="true" style="background:' + ACCENT[a.accent] + '">' + esc(initials(a.name)) + '</span>' +
       '<span class="nm"><b translate="no">' + esc(a.name) + '</b><span>' + esc(note) + '</span></span>' +
@@ -1077,7 +1194,7 @@ function reportUi(): void {
   void api.setUiPrefs({ lang, mode: themeMode(), dark: isDark(), ...themeColours() }).catch(() => {});
 }
 
-/* --- Claude usage (Settings) --- */
+/* --- AI usage (Settings) --- */
 const USAGE_DAYS = 14;
 const USAGE_WEEKS = 8;
 // Each number keeps its sidebar colour in the chart (teal stepped up so the set passes the colourblind checks).
@@ -1151,7 +1268,7 @@ function renderUsage(): void {
   const cols = buckets.map(bk => series.map(s => t(sum(bk.start, bk.end, s.key))));
   const max = Math.max(0, ...cols.map(c => c.reduce((a, b) => a + b, 0)));
   if (!max) {
-    chart.innerHTML = '<p class="usage-empty">No Claude runs in the last ' + (state.usageUnit === 'day' ? USAGE_DAYS + ' days' : USAGE_WEEKS + ' weeks') + '.</p>';
+    chart.innerHTML = '<p class="usage-empty">No AI runs in the last ' + (state.usageUnit === 'day' ? USAGE_DAYS + ' days' : USAGE_WEEKS + ' weeks') + '.</p>';
   } else {
     const W = Math.max(320, chart.clientWidth || 620), H = 190, L = 44, B = 24, T = 10, R = 6;
     const iw = W - L - R, ih = H - T - B;
@@ -1160,7 +1277,7 @@ function renderUsage(): void {
     const y = (v: number) => T + ih - (v / top) * ih;
     const band = iw / buckets.length;
     const bw = Math.min(30, band * 0.62);
-    let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H + '" role="img" aria-label="Claude tokens per ' + state.usageUnit + ' by number">';
+    let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H + '" role="img" aria-label="AI tokens per ' + state.usageUnit + ' by number">';
     for (let v = 0; v <= top + 1e-9; v += step) {
       svg += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y(v) + '" y2="' + y(v) + '" class="grid' + (v === 0 ? ' base' : '') + '"/>' +
         '<text x="' + (L - 6) + '" y="' + (y(v) + 3.5) + '" text-anchor="end" class="ax">' + fmtTok(v) + '</text>';
@@ -1369,13 +1486,23 @@ function renderAutoState(): void {
   const el = document.getElementById('autoState'); if (!el) return;
   const a = state.auto;
   const chat = a?.runningChat ? chatById(a.runningChat) : null;
-  el.textContent = !state.settings.autoOn ? 'Off. Only your own Summarize clicks call Claude.'
-    : !state.ai.connected ? 'Waiting for Claude to be connected above.'
+  el.textContent = !state.settings.autoOn ? 'Off. Only your own Summarize clicks call the AI.'
+    : !state.ai.connected ? 'Waiting for an AI to be connected above.'
     : !a ? 'Checking…'
     : a.pausedUntil ? 'Paused until ' + clock(a.pausedUntil) + '. ' + (a.pausedWhy ?? '')
     : a.runningChat ? 'Summarizing ' + (chat?.name ?? 'a chat') + (a.pending > 1 ? ' · ' + (a.pending - 1) + ' more waiting' : '') + '.'
     : a.nextAt ? a.pending + ' chat' + (a.pending === 1 ? '' : 's') + ' with new messages · next run ' + clock(a.nextAt) + '.'
     : 'Nothing new. No runs scheduled until a message arrives.';
+  const p = state.settings.provider;
+  $('#budgetRow').hidden = !PROVIDERS[p].quota;
+  $<HTMLSelectElement>('#autoDailyBudget').value = String(state.settings.autoDailyBudget);
+  const skip = ' Groups you never write in are skipped unless pinned.';
+  $('#autoNote').textContent = (isClaude(p)
+    ? 'Runs on your Claude plan, one chat at a time, pinned first. Pauses for 30 minutes if the plan reaches its usage limit.'
+    : p === 'local' ? `Runs on this computer, one chat at a time, pinned first, at most ${FREE_CAP} chats every 10 minutes so it doesn't hold up your other work.`
+    : PROVIDERS[p].quota ? `Runs on the free plan, one chat at a time, pinned first: at most ${FREE_CAP} chats every 10 minutes and no more than the daily budget above. Pauses until the quota resets if Google says it's used up.`
+    : p === 'codex' ? 'Runs on your ChatGPT plan, one chat at a time, pinned first. Pauses for 30 minutes if the plan reaches its Codex limit.'
+    : 'Runs on the service you entered, one chat at a time, pinned first. Pauses if it reports a usage limit.') + skip;
 }
 
 /* ============ render ============ */
@@ -1393,7 +1520,7 @@ function render(): void {
   segL.hidden = over === 0;
   const chip = $('#aiChip');
   chip.dataset.on = String(state.ai.connected);
-  $('#aiChipLabel').textContent = state.ai.connected ? MODEL_LABEL[model()] + ' connected' : 'Claude not connected';
+  $('#aiChipLabel').textContent = state.ai.connected ? modelLabel(model()) + ' connected' : 'AI not connected';
   syncPanel();
 }
 function syncPanel(): void {
@@ -1711,6 +1838,12 @@ document.addEventListener('click', e => {
     return;
   }
 
+  const lu = t.closest<HTMLElement>('[data-lm-use]');
+  if (lu) {
+    const name = lu.dataset.lmUse!;
+    void api.saveSettings({ localModel: name }).then(s => { state.settings = s; return checkAi(false); }).then(() => toast(modelLabel('local:' + name) + ' selected', 'ok'));
+    return;
+  }
   const dc = t.closest<HTMLElement>('[data-dbcopy]');
   if (dc) { void copyText(dc.dataset.dbcopy ?? '', dc.dataset.dblabel ?? 'Value'); return; }
 
@@ -1842,6 +1975,8 @@ document.addEventListener('click', e => {
 
   const save = t.closest<HTMLElement>('[data-save-media]');
   if (save) { void saveMedia(save.dataset.saveMedia!); return; }
+  const tag = t.closest<HTMLElement>('[data-mention-pick]');
+  if (tag) { pickMention(Number(tag.dataset.mentionPick)); return; }
 
   const btn = t.closest('button');
   switch (btn?.id) {
@@ -1871,7 +2006,7 @@ document.addEventListener('click', e => {
     case 'convoBack': case 'repBack': document.body.classList.remove('mob-convo'); return;
     case 'searchClear': $<HTMLInputElement>('#search').value = ''; state.q = ''; state.hits = null; $('#searchClear').hidden = true; renderList(); $('#search').focus(); return;
     case 'summarizeBtn':
-      if (!state.ai.connected) { toast('Connect Claude first', 'bad'); setView('settings'); return; }
+      if (!state.ai.connected) { toast('Connect an AI first', 'bad'); setView('settings'); return; }
       state.panelOpen = true; syncPanel(); void runSummary(); return;
     case 'runSummary': void runSummary(); return;
     case 'resummarize': void runSummary({ force: true }); return;
@@ -1897,7 +2032,7 @@ document.addEventListener('click', e => {
       const custom = $<HTMLSelectElement>('#repPreset').value === 'custom';
       const text = $<HTMLTextAreaElement>('#repCustom').value.trim();
       if (custom && !text) {
-        $('#repCustomErr').innerHTML = icon('warn', 13) + ' Write what Claude should pull out, or choose another report type.';
+        $('#repCustomErr').innerHTML = icon('warn', 13) + ' Write what the AI should pull out, or choose another report type.';
         $('#repCustomErr').hidden = false; $('#repCustom').setAttribute('aria-invalid', 'true'); bad = true;
       }
       if (bad) return;
@@ -1915,7 +2050,18 @@ document.addEventListener('click', e => {
       return;
     }
     case 'testKey': void testKey(); return;
-    case 'checkCc': void checkAi(true); return;
+    case 'checkCc': case 'checkAgy': case 'checkCodex': void checkAi(true); return;
+    case 'checkLocal': state.localFound = null; void checkAi(true); return;
+    case 'diagLocal': case 'diagAgy': case 'diagCodex':
+      void api.aiDiagnostics(state.settings.provider).then(t => copyText(t, 'Diagnostics')).catch(fail);
+      return;
+    case 'testGemini': void testProvider('gemini'); return;
+    case 'testOpenai': void testProvider('openai'); return;
+    case 'disconnectGemini': case 'disconnectOpenai': {
+      const k = btn!.id === 'disconnectGemini' ? 'gemini' : 'openai';
+      void api.disconnectProvider(k).then(() => checkAi(false)).then(() => toast(k === 'gemini' ? 'Gemini key removed' : 'Key forgotten'));
+      return;
+    }
     case 'testNotify': void api.testNotification().then(() => toast('Test sent. Two banners: pinned, then other.', 'ok')).catch(fail); return;
     case 'openNotifySettings': void api.openNotificationSettings().catch(fail); return;
     case 'disconnectKey':
@@ -2062,15 +2208,131 @@ async function savePartner(partner: string | null, type: string | null, service:
 async function checkAi(announce: boolean): Promise<void> {
   state.ai.testing = true; renderSettings();
   try {
-    state.ai = await api.checkAi();
+    state.ai = await api.checkAi(announce);
   } catch (e) {
     state.ai.testing = false; fail(e);
   }
   state.summary = { ...state.summary, error: null };
   render();
-  if (announce || state.ai.provider === 'claude-code') {
-    if (state.ai.connected) toast(state.ai.provider === 'claude-code' ? 'Claude Code connected' : MODEL_LABEL[model()] + ' connected', 'ok');
-    else if (announce) toast(state.ai.cliFound ? 'Claude Code is not signed in' : 'Claude Code not found', 'bad');
+  const p = state.ai.provider;
+  if (announce || p === 'claude-code') {
+    if (state.ai.connected) toast(p === 'claude-code' ? 'Claude Code connected' : modelLabel(model()) + ' connected', 'ok');
+    else if (announce) toast(notConnected(state.ai), 'bad');
+  }
+}
+
+/** Why the selected provider isn't connected, in a few words for a toast. */
+function notConnected(ai: AiStatus): string {
+  switch (ai.provider) {
+    case 'claude-code': return ai.cliFound ? 'Claude Code is not signed in' : 'Claude Code not found';
+    case 'codex': return ai.cliFound ? 'Codex is not signed in' : 'Codex CLI not found';
+    case 'antigravity': return ai.cliFound ? (ai.detail ?? 'Antigravity is not signed in') : 'Antigravity CLI not found';
+    case 'local': return ai.cliFound ? 'Ollama has no model installed yet' : 'Ollama is not running on ' + HERE;
+    default: return 'Not connected';
+  }
+}
+
+/* --- AI connection boxes (Settings) --- */
+const BOXES: Record<AiProvider, string> = {
+  'claude-code': '#ccBox', api: '#keyBox', local: '#localBox', gemini: '#geminiBox', openai: '#openaiBox', antigravity: '#agyBox', codex: '#codexBox',
+};
+
+/** Fills a text field from settings unless the person is typing in it. */
+function fill(id: string, v: string): void {
+  const i = $<HTMLInputElement>('#' + id);
+  if (document.activeElement !== i) i.value = v;
+}
+
+function showErr(id: string, msg: string | null | undefined): void {
+  const el = $('#' + id);
+  el.hidden = !msg;
+  if (msg) el.innerHTML = icon('warn', 13) + ' ' + esc(msg);
+}
+
+function renderProviderBox(): void {
+  const s = state.settings, ai = state.ai, p = s.provider;
+  const mine = ai.provider === p;
+  const on = mine && ai.connected;
+  const checking = ai.testing ? 'Checking…' : null;
+  if (p === 'local') {
+    const have = mine ? ai.models ?? [] : [];
+    const running = mine && ai.cliFound;
+    $('#localState').textContent = checking ?? (on ? 'Connected · ' + (ai.account ?? 'Ollama') : running ? 'Ollama is running, but has no model yet' : 'Ollama not found');
+    $('#localModels').innerHTML = have.map(name => {
+      const use = name === s.localModel;
+      return '<div class="lm' + (use ? ' on' : '') + '"><b translate="no">' + esc(name) + '</b><span class="kv">Installed in Ollama</span><span class="acts">' +
+        (use ? '<span class="kv">In use</span>' : '<button type="button" class="btn btn-sm" data-lm-use="' + esc(name) + '">Use</button>') + '</span></div>';
+    }).join('');
+    $('#localGuide').hidden = ai.testing || !mine || have.length > 0;
+  }
+  if (p === 'gemini') {
+    $<HTMLInputElement>('#geminiAgreed').checked = s.geminiAgreed;
+    fill('geminiModel', s.geminiModel);
+    $('#geminiState').textContent = checking ?? (on ? 'Connected' : 'Not connected');
+    $('#disconnectGemini').hidden = !on;
+    const b = $<HTMLButtonElement>('#testGemini');
+    b.disabled = ai.testing || !s.geminiAgreed;
+    b.textContent = ai.testing ? 'Testing…' : on ? 'Re-test connection' : 'Test connection';
+  }
+  if (p === 'openai') {
+    fill('openaiBaseUrl', s.openaiBaseUrl);
+    fill('openaiModel', s.openaiModel);
+    $('#openaiState').textContent = checking ?? (on ? 'Connected' : 'Not connected');
+    $('#disconnectOpenai').hidden = !on;
+    $<HTMLButtonElement>('#testOpenai').disabled = ai.testing;
+  }
+  if (p === 'antigravity') {
+    fill('agyModel', s.agyModel);
+    $('#agyState').textContent = checking ?? (on ? 'Connected' : mine && ai.cliFound ? 'Not checked yet' : 'Not installed');
+    $<HTMLButtonElement>('#checkAgy').disabled = ai.testing;
+    showErr('agyErr', mine && !ai.testing ? ai.detail : null);
+  }
+  if (p === 'codex') {
+    fill('codexModel', s.codexModel);
+    $('#codexState').textContent = checking ?? (on ? 'Signed in' + (ai.account ? ' · ' + ai.account : '') : mine && ai.cliFound ? 'Not signed in' : 'Not installed');
+    $<HTMLButtonElement>('#checkCodex').disabled = ai.testing;
+    showErr('codexErr', mine && !ai.testing && ai.cliFound && !ai.connected ? 'Run codex login in Terminal, then press Check again.' : null);
+  }
+}
+
+/** Looks for Ollama and its models, for the note on the Local model card. */
+let detecting = false;
+function detectLocal(): void {
+  if (detecting) return;
+  detecting = true;
+  void api.detectLocal().then(f => { state.localFound = f; renderLocalFound(); }).catch(() => {}).finally(() => { detecting = false; });
+}
+
+function renderLocalFound(): void {
+  const el = document.getElementById('localFound'); if (!el) return;
+  const f = state.localFound;
+  if (!f) { el.hidden = true; detectLocal(); return; }
+  const top = f.models.filter(m => !/embed/i.test(m));
+  el.hidden = false;
+  el.className = 'found' + (top.length ? '' : ' none');
+  el.textContent = top.length ? 'Found: ' + top.slice(0, 2).join(', ') + (top.length > 2 ? ' +' + (top.length - 2) : '')
+    : f.running ? 'Ollama found, no model yet' : 'Not found on ' + HERE;
+}
+
+async function testProvider(kind: 'gemini' | 'openai'): Promise<void> {
+  const input = $<HTMLInputElement>(kind === 'gemini' ? '#geminiKey' : '#openaiKey');
+  const errId = kind === 'gemini' ? 'geminiErr' : 'openaiErr';
+  showErr(errId, null);
+  if (kind === 'gemini' && !state.settings.geminiAgreed) { showErr(errId, 'Tick the box above first: it says Google may use what you send.'); return; }
+  const patch: Partial<Settings> = kind === 'gemini'
+    ? { geminiModel: $<HTMLInputElement>('#geminiModel').value.trim() }
+    : { openaiBaseUrl: $<HTMLInputElement>('#openaiBaseUrl').value.trim(), openaiModel: $<HTMLInputElement>('#openaiModel').value.trim() };
+  state.settings = await api.saveSettings(patch);
+  state.ai.testing = true; renderSettings();
+  const r = await api.testProviderKey(kind, input.value.trim() || null);
+  state.ai.testing = false;
+  if (r.ok) {
+    input.value = '';
+    await checkAi(false);
+    toast(modelLabel(model()) + ' connected', 'ok');
+  } else {
+    showErr(errId, r.error ?? 'That did not work.');
+    renderSettings();
   }
 }
 
@@ -2079,7 +2341,7 @@ async function testKey(): Promise<void> {
   const key = input.value.trim();
   err.hidden = true; input.removeAttribute('aria-invalid');
   if (!key) {
-    if (state.ai.connected) { toast(MODEL_LABEL[model()] + ' is connected', 'ok'); return; }
+    if (state.ai.connected) { toast(modelLabel(model()) + ' is connected', 'ok'); return; }
     err.innerHTML = icon('warn', 13) + ' Paste a key first — it starts with sk-ant-.';
     err.hidden = false; input.setAttribute('aria-invalid', 'true'); input.focus(); return;
   }
@@ -2094,7 +2356,7 @@ async function testKey(): Promise<void> {
     state.ai.connected = true;
     input.value = '';
     render();
-    toast(MODEL_LABEL[model()] + ' connected', 'ok');
+    toast(modelLabel(model()) + ' connected', 'ok');
   } else {
     err.innerHTML = icon('warn', 13) + ' ' + esc(r.error ?? 'That key did not work.');
     err.hidden = false; input.setAttribute('aria-invalid', 'true');
@@ -2111,6 +2373,7 @@ document.addEventListener('input', e => {
     const sb = document.getElementById('sendBtn') as HTMLButtonElement | null;
     if (sb) sb.disabled = state.sending || !(t.value.trim() || state.photo?.chatId === state.chat);
     fitComposer(t as unknown as HTMLTextAreaElement);
+    syncMention(t as unknown as HTMLTextAreaElement);
   }
   if (t.id === 'editBox' && state.editing) { state.editing.text = t.value; fitComposer(t as unknown as HTMLTextAreaElement, 240); }
   if (t.id === 'search') {
@@ -2143,15 +2406,21 @@ document.addEventListener('change', e => {
     const a = acctById(t.dataset.numlang);
     void api.setNumberLang(t.dataset.numlang, t.value).then(accts => {
       state.accounts = accts; renderLangList();
-      toast((a?.name ?? 'Number') + ': Claude now writes in ' + (t.value === 'id' ? 'Bahasa Indonesia' : 'English'), 'ok');
+      toast((a?.name ?? 'Number') + ': the AI now writes in ' + (t.value === 'id' ? 'Bahasa Indonesia' : 'English'), 'ok');
     }).catch(fail);
     return;
   }
-  if (t.id === 'model') void api.saveSettings({ model: t.value as ModelId }).then(s => { state.settings = s; render(); toast(MODEL_LABEL[s.model] + ' selected'); });
+  if (t.id === 'model') void api.saveSettings({ model: t.value as ClaudeModel }).then(s => { state.settings = s; render(); toast(modelLabel(s.model) + ' selected'); });
   if (t.name === 'provider') {
+    if (t.value === 'local') state.localFound = null;
     state.ai = { ...state.ai, provider: t.value as AiProvider, connected: false, testing: true };
     void api.saveSettings({ provider: t.value as AiProvider }).then(s => { state.settings = s; return checkAi(false); });
   }
+  if (t.id === 'geminiAgreed') void api.saveSettings({ geminiAgreed: t.checked }).then(s => { state.settings = s; return checkAi(false); });
+  if (['geminiModel', 'openaiModel', 'openaiBaseUrl', 'agyModel', 'codexModel'].includes(t.id)) {
+    void api.saveSettings({ [t.id]: t.value.trim() } as Partial<Settings>).then(s => { state.settings = s; return t.id.startsWith('openai') ? checkAi(false) : renderSettings(); });
+  }
+  if (t.id === 'autoDailyBudget') void api.saveSettings({ autoDailyBudget: Number(t.value) }).then(s => { state.settings = s; renderAutoState(); });
   if (t.id === 'window') void api.saveSettings({ window: (t.value === 'week' ? 'week' : Number(t.value)) as Settings['window'] }).then(s => { state.settings = s; render(); });
   if (['notifyOn', 'notifyPreview', 'notifyOverdue', 'menuBar'].includes(t.id)) void api.saveSettings({ [t.id]: t.checked } as Partial<Settings>).then(s => { state.settings = s; renderSettings(); });
   if (['notifyPinnedSound', 'notifyOtherSound', 'notifyOthers', 'notifyBadge'].includes(t.id)) void api.saveSettings({ [t.id]: t.value } as Partial<Settings>).then(s => { state.settings = s; renderSettings(); });
@@ -2167,7 +2436,7 @@ document.addEventListener('change', e => {
   if (t.dataset.ctphone && state.ct) state.ct.keep[t.dataset.ctphone] = t.value;
   if (t.id === 'autoOn') void api.saveSettings({ autoOn: t.checked }).then(s => { state.settings = s; renderSettings(); toast(s.autoOn ? 'Auto summary on' : 'Auto summary off'); });
   if (['pinEveryMin', 'pinWindow', 'otherEveryMin', 'otherWindow'].includes(t.id)) void api.saveSettings({ [t.id]: Number(t.value) } as Partial<Settings>).then(s => { state.settings = s; renderSettings(); });
-  if (t.id === 'aiImages') void api.saveSettings({ aiImages: t.checked }).then(s => { state.settings = s; toast(s.aiImages ? 'Claude will see photos in summaries' : 'Summaries now use text only'); });
+  if (t.id === 'aiImages') void api.saveSettings({ aiImages: t.checked }).then(s => { state.settings = s; toast(s.aiImages ? 'The AI will see photos in summaries' : 'Summaries now use text only'); });
   if (t.id === 'openAtLogin') void api.saveSettings({ openAtLogin: t.checked }).then(s => { state.settings = s; toast(s.openAtLogin ? 'WA Turbo opens at login' : 'WA Turbo no longer opens at login'); });
   if (t.id === 'repPreset') syncReportDialog();
   if (t.id === 'loopGroup') { state.loopGroup = t.value; renderLoops(); }
@@ -2182,12 +2451,31 @@ document.addEventListener('change', e => {
 });
 
 document.addEventListener('keydown', e => {
+  if ((e.target as HTMLElement).id === 'composer' && mentionKey(e)) return;
   if ((e.target as HTMLElement).id === 'composer' && e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); void sendFromComposer(); }
   if ((e.target as HTMLElement).id === 'editBox' && e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); void saveEdit(); }
   if ((e.target as HTMLElement).id === 'editBox' && e.key === 'Escape') { state.editing = null; renderConvoKeepScroll(); return; }
   if (e.key === 'Escape') closeAcctMenu();
   if ((e.target as HTMLElement).id === 'pairName' && e.key === 'Enter') { e.preventDefault(); void pairNext(); }
   if (e.key === 'Escape' && state.panelOpen && !wide.matches && !document.querySelector('dialog[open]')) { state.panelOpen = false; syncPanel(); }
+});
+
+// Pasting a photo (a screenshot, a copied image or image file) attaches it, as the paperclip does.
+document.addEventListener('paste', e => {
+  if ((e.target as HTMLElement).id !== 'composer' || !state.chat) return;
+  const dt = e.clipboardData;
+  if (!dt) return;
+  // Copied cells and rich text often carry a picture of themselves as well; those paste as text.
+  if (dt.types.includes('text/html') && dt.getData('text/plain').trim()) return;
+  const file = [...dt.items].find(i => i.kind === 'file' && i.type.startsWith('image/'))?.getAsFile();
+  if (!file) return;
+  e.preventDefault();
+  void pastePhoto(file);
+});
+// The tag list keeps focus in the composer while it is clicked, and closes when the composer loses it.
+document.addEventListener('mousedown', e => { if ((e.target as HTMLElement).closest('[data-mention-pick]')) e.preventDefault(); });
+document.addEventListener('focusout', e => {
+  if ((e.target as HTMLElement).id === 'composer' && state.mention) { state.mention = null; renderMentionPop(); }
 });
 
 $('#dlgReport').addEventListener('close', () => { $('#repCustomErr').hidden = true; $('#repPickErr').hidden = true; });

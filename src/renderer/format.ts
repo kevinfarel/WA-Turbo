@@ -4,15 +4,16 @@ export const esc = (s: unknown): string => String(s ?? '').replace(/[&<>"']/g, c
 
 /**
  * WhatsApp formatting for a message: ```code```, `code`, *bold*, _italic_, ~strike~, > quotes,
- * "- " / "* " bullets and links. Line breaks stay as typed (.tx is pre-wrap).
+ * "- " / "* " bullets, links and @ tags (shown by name when `mentions` knows the number). Line breaks stay as typed (.tx is pre-wrap).
  */
-export function fmtText(raw: string): string {
+export function fmtText(raw: string, mentions?: Record<string, string>): string {
   const kept: string[] = [];
   const hold = (html: string) => '\u0000' + (kept.push(html) - 1) + '\u0000';
   let s = raw
     .replace(/```([\s\S]+?)```/g, (_, code: string) => hold('<code class="blk">' + esc(code.replace(/^\n|\n$/g, '')) + '</code>'))
     .replace(/`([^`\n]+)`/g, (_, code: string) => hold('<code>' + esc(code) + '</code>'))
     .replace(/\bhttps?:\/\/[^\s<>"]*[^\s<>".,;:!?)\]'*_~]/g, url => hold('<a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(url) + '</a>'))
+    .replace(/@(\d{5,})/g, (all, tok: string) => (mentions?.[tok] ? hold('<span class="mention">@' + esc(mentions[tok]) + '</span>') : all))
     .replace(/^> ?(.*)$/gm, '\u0001q$1\u0001/q')
     .replace(/^([-*]) (?=\S)/gm, '• ');
   for (const [mark, tag] of [['\\*', 'b'], ['_', 'i'], ['~', 's']]) {
