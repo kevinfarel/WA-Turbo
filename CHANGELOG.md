@@ -4,6 +4,8 @@ User-visible changes to WA Turbo. The format follows [Keep a Changelog](https://
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-02
+
 ### Added
 - More ways to connect an AI, in Settings → AI connection, grouped as subscription, free and pay per use.
   - **Local model:** WA Turbo finds Ollama on the computer and the models installed there (Qwen, Gemma and others), shows them on the card, and picks the best one by itself; summaries then run privately and offline. Nothing is bundled or downloaded by WA Turbo; when no model is found, the box explains how to install Ollama and pull one.
