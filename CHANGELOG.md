@@ -4,6 +4,20 @@ User-visible changes to WA Turbo. The format follows [Keep a Changelog](https://
 
 ## [Unreleased]
 
+### Added
+- More ways to connect an AI, in Settings → AI connection, grouped as subscription, free and pay per use.
+  - **Local model:** WA Turbo finds Ollama on the computer and the models installed there (Qwen, Gemma and others), shows them on the card, and picks the best one by itself; summaries then run privately and offline. Nothing is bundled or downloaded by WA Turbo; when no model is found, the box explains how to install Ollama and pull one.
+  - **Gemini free key** from Google AI Studio, with a step-by-step guide and an Open Google AI Studio button in the app, after accepting a warning that Google may use the messages on the free tier.
+  - **Other (OpenAI-compatible):** Groq, OpenRouter, OpenAI or any compatible address, with your own model name and key.
+  - **ChatGPT (Codex)** and **Google (Antigravity)**, marked Experimental: they run the vendor's own CLI signed in on the computer (read-only, in an empty folder). Not yet tried on a real sign-in; Copy diagnostics gives testers a report with no message text. Antigravity is text only.
+- Tag people in group chats: type **@** in the composer to pick a member (arrow keys and Enter or Tab, or click), and they get a real WhatsApp tag. Tags in messages now show the person's name instead of a number, in the chat, in notifications and in what the AI reads.
+- Paste a photo straight into the composer (a screenshot, a copied image or an image file) to attach it, with no need for the paperclip. Copied text or spreadsheet cells still paste as text.
+- On the free AIs, auto summary runs at most 10 chats in any 10 minutes, and on Gemini and Antigravity it also stops for the day after a daily budget (100 runs by default, Settings → Auto summary), so the free quota keeps room for your own Summarize clicks. When a provider says its quota is used up, auto summary waits until it resets.
+
+### Changed
+- Wording says "AI" instead of "Claude" wherever it isn't about Claude itself: "AI usage", "AI not connected", "Let the AI see photos", and so on, in English and Bahasa Indonesia.
+- Settings → Model shows the Claude model only for the Claude connections; the other connections pick their model in their own box.
+
 ## [0.3.0] - 2026-10-31
 
 ### Added

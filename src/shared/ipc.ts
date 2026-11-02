@@ -1,6 +1,6 @@
 import type {
   Account, Accent, AiStatus, AutoStatus, Bootstrap, ChatSummaryRow, Loop, LoopDir, Message, PairState, Partner, PresetId,
-  ContactImportPreview, ContactImportResult, ContactsInfo, DbInfo, Lang, UiPrefs, Report, RunProgress, Settings, SummaryResult, SummaryWindow, TeamMember, UsageBucket,
+  AiProvider, ContactImportPreview, GroupMember, ContactImportResult, ContactsInfo, DbInfo, Lang, LocalFound, UiPrefs, Report, RunProgress, Settings, SummaryResult, SummaryWindow, TeamMember, UsageBucket,
 } from './types';
 
 // Every call the window can make. The main process registers one handler per key (ipc/router.ts),
@@ -27,9 +27,13 @@ export interface Api {
   searchChats(acct: string, q: string): Promise<string[]>;
   getMessages(chatId: string, limit: number): Promise<Message[]>;
   openChat(chatId: string): Promise<void>;
-  /** Sends what the person typed, plus the photo they picked with pickPhoto. */
-  sendMessage(chatId: string, text: string, photoToken: string | null): Promise<void>;
+  /** Sends what the person typed, plus the photo they picked or pasted, tagging `mentions` (group members' IDs). */
+  sendMessage(chatId: string, text: string, photoToken: string | null, mentions: string[]): Promise<void>;
   pickPhoto(): Promise<PickedPhoto | null>;
+  /** A photo pasted into the composer, held like a picked one until it is sent. */
+  pastePhoto(data: Uint8Array, mime: string): Promise<PickedPhoto>;
+  /** The people in a group chat, for @ tags. Empty for direct chats. */
+  groupMembers(chatId: string): Promise<GroupMember[]>;
   /** The chat open in the window (null on other tabs), so it doesn't notify while you read it. */
   setActiveChat(chatId: string | null): Promise<void>;
   /** Mutes notifications for a chat in WA Turbo only (not on your phone). Null unmutes; Infinity = until unmuted. */
@@ -50,7 +54,7 @@ export interface Api {
   loopAction(loopId: string, act: 'answered' | 'nudge' | 'snooze' | 'reopen' | 'dismiss' | 'flip'): Promise<Loop>;
   /** My team: people on your side in group chats, marked from one of their messages. */
   listTeam(): Promise<TeamMember[]>;
-  /** Claude token usage per hour and number since a time (epoch ms). */
+  /** AI token usage per hour and number since a time (epoch ms). */
   usage(since: number): Promise<UsageBucket[]>;
   setTeam(messageId: string, onTeam: boolean): Promise<TeamMember[]>;
   removeTeam(memberId: string): Promise<TeamMember[]>;
@@ -60,17 +64,24 @@ export interface Api {
   cancelPairing(): Promise<void>;
   reconnect(accountId: string): Promise<void>;
   unlink(accountId: string): Promise<void>;
-  /** The language Claude writes in for a number. Null forgets it, so it is detected again from the chats. */
+  /** The language the AI writes in for a number. Null forgets it, so it is detected again from the chats. */
   setNumberLang(accountId: string, lang: Lang | null): Promise<Account[]>;
   /** App language and theme, so notifications, the menu bar and the window background match. */
   setUiPrefs(p: UiPrefs): Promise<void>;
 
   getSettings(): Promise<Settings>;
   saveSettings(patch: Partial<Settings>): Promise<Settings>;
-  /** Re-checks the selected Claude connection (looks for the Claude Code CLI again). */
-  checkAi(): Promise<AiStatus>;
+  /** Re-checks the selected AI connection (looks for the CLI again). deep: also run Antigravity's tiny sign-in check. */
+  checkAi(deep?: boolean): Promise<AiStatus>;
   testKey(key: string): Promise<{ ok: boolean; error: string | null }>;
   disconnectKey(): Promise<void>;
+  /** Gemini or OpenAI-compatible: checks the key (null = the saved one) with the model and address in Settings, then saves it. */
+  testProviderKey(provider: 'gemini' | 'openai', key: string | null): Promise<{ ok: boolean; error: string | null }>;
+  disconnectProvider(provider: 'gemini' | 'openai'): Promise<void>;
+  /** Looks for Ollama on this computer and the models installed there (for the Local model card). */
+  detectLocal(): Promise<LocalFound>;
+  /** Experimental providers: what their last run did, without any message text. */
+  aiDiagnostics(provider: AiProvider): Promise<string>;
 
   /** Uses the saved summary when nothing changed (result.cached); force reads again anyway. */
   summarize(chatId: string, opts?: { window?: SummaryWindow; force?: boolean }): Promise<SummaryResult>;
@@ -115,10 +126,10 @@ export type EventKey = keyof Events;
 
 export const API_KEYS: ApiKey[] = [
   'bootstrap', 'retryDb', 'dbInfo', 'setDbTools', 'showDbFolder', 'previewContacts', 'applyContacts', 'contactsInfo', 'clearContacts',
-  'listChats', 'listAllChats', 'searchChats', 'getMessages', 'openChat', 'setActiveChat', 'setMuted', 'testNotification', 'openNotificationSettings', 'sendMessage', 'editMessage', 'deleteForEveryone', 'pickPhoto', 'saveMedia', 'setChatPartner',
+  'listChats', 'listAllChats', 'searchChats', 'getMessages', 'openChat', 'setActiveChat', 'setMuted', 'testNotification', 'openNotificationSettings', 'sendMessage', 'editMessage', 'deleteForEveryone', 'pickPhoto', 'pastePhoto', 'groupMembers', 'saveMedia', 'setChatPartner',
   'listLoops', 'flagMessage', 'loopAction', 'listTeam', 'setTeam', 'removeTeam', 'usage',
   'startPairing', 'refreshPairing', 'cancelPairing', 'reconnect', 'unlink', 'setNumberLang', 'setUiPrefs',
-  'getSettings', 'saveSettings', 'checkAi', 'testKey', 'disconnectKey',
+  'getSettings', 'saveSettings', 'checkAi', 'testKey', 'disconnectKey', 'testProviderKey', 'disconnectProvider', 'detectLocal', 'aiDiagnostics',
   'summarize', 'cancelRun', 'lastSummary', 'setPinned', 'autoStatus',
   'listReports', 'generateReport', 'deleteReport', 'exportReport', 'copyText',
 ];

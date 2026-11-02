@@ -4,7 +4,8 @@ import { PRESETS } from '@shared/presets';
 import {
   addAliases, cachedSummary, chatMeta, chatRev, langOfChat, listAccounts, listAliases, listLoops, messagesSince, saveReport, saveSummary, setSummarized,
 } from '../db/queries';
-import { MODEL_NAMES, structured } from './client';
+import { modelLabel } from '@shared/ai';
+import { structured } from './client';
 import { stamp, transcript } from './context';
 import { customSystem, PRESET_FOCUS, synthSystem } from './prompts';
 import { AliasBook, redact, restore } from './redact';
@@ -35,7 +36,7 @@ export async function generateReport(
   presetId: PresetId, days: Report['days'], chatIds: string[], custom: string, model: ModelId, runId: string, emit: Progress, signal?: AbortSignal,
 ): Promise<Report> {
   const s = stepper(runId, 'report', null, [
-    `Reading text from ${chatIds.length} chat${chatIds.length === 1 ? '' : 's'}`, 'Redacting phone numbers', `${MODEL_NAMES[model]} is summarizing`, 'Assembling the report',
+    `Reading text from ${chatIds.length} chat${chatIds.length === 1 ? '' : 's'}`, 'Redacting phone numbers', `${modelLabel(model)} is summarizing`, 'Assembling the report',
   ], emit);
   const since = Date.now() - Number(days) * 24 * 3_600_000;
   const now = Date.now();

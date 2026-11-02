@@ -116,6 +116,7 @@ export function mapMessage(m: WAMessage, me: Identity, book: JidBook, names: (ji
       quotedWaId: ctx?.stanzaId ?? null,
       quotedFromMe: !!ctx?.stanzaId && mine(ctx.participant),
       mentionsMe: (ctx?.mentionedJid ?? []).some(j => mine(j)),
+      mentions: mentionsOf(ctx?.mentionedJid, mine, book),
       media,
       raw: media ? JSON.parse(JSON.stringify(m, BufferJSON.replacer)) : {
         key: m.key, ...(m.participant ? { participant: m.participant } : {}), ...(m.pushName ? { pushName: m.pushName } : {}),
@@ -123,6 +124,17 @@ export function mapMessage(m: WAMessage, me: Identity, book: JidBook, names: (ji
       },
     },
   };
+}
+
+/** "@<number>" as written in the text → the tagged person's ID (phone-number form when known), 'me' for you. */
+function mentionsOf(jids: string[] | null | undefined, mine: (j: string) => boolean, book: JidBook): Record<string, string> | null {
+  if (!jids?.length) return null;
+  const out: Record<string, string> = {};
+  for (const j of jids) {
+    const tok = jidNormalizedUser(j).split('@')[0];
+    if (tok) out[tok] = mine(j) ? 'me' : book.canonical(j);
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 function typeOf(ctype: string): MessageType {

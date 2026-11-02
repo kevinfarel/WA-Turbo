@@ -1,13 +1,14 @@
 import { z } from 'zod';
+import { cheapModel } from '@shared/ai';
 import type { Lang } from '@shared/types';
-import { addAliases, langSamples, listAliases, setAccountLang } from '../db/queries';
+import { addAliases, getSettings, langSamples, listAliases, setAccountLang } from '../db/queries';
 import { structured } from './client';
 import { DETECT_SYSTEM } from './prompts';
 import { AliasBook, redact } from './redact';
 
 // A number that has no language yet gets one picked from its first conversations: the newest
-// messages of its 10 most recent chats go to Claude Haiku once, and the answer (English or
-// Bahasa Indonesia) becomes what Claude writes in for that number. You can change it any time in
+// messages of its 10 most recent chats go to the AI once (Claude Haiku on the Claude providers), and the answer (English or
+// Bahasa Indonesia) becomes what the AI writes in for that number. You can change it any time in
 // Settings; a language you picked is never replaced. Nothing here sends a WhatsApp message.
 
 const DetectOut = z.object({ lang: z.enum(['en', 'id']) });
@@ -40,7 +41,7 @@ class LangDetect {
     this.hooks = null;
   }
 
-  /** New messages arrived, or Claude was just connected (force: retry now even after a failure). */
+  /** New messages arrived, or the AI was just connected (force: retry now even after a failure). */
   poke(force = false): void {
     if (force) this.failedAt = 0;
     this.soon(force ? 1_000 : 30_000);
@@ -58,7 +59,7 @@ class LangDetect {
     try {
       const todo = await langSamples();
       if (!todo.length) return;
-      if (!(await this.hooks.isConnected())) return; // AI setup pokes again once Claude is connected
+      if (!(await this.hooks.isConnected())) return; // Settings pokes again once the AI is connected
       for (const a of todo) {
         const settled = a.chats >= WANT_CHATS || !a.pairedAt || Date.now() - a.pairedAt > SETTLE_MS;
         if (!settled || a.lines.length < MIN_LINES) { waiting = true; continue; }
@@ -80,7 +81,7 @@ export async function detectLang(lines: string[]): Promise<Lang> {
   const book = new AliasBook(await listAliases());
   const text = lines.slice(0, 80).map(l => '- ' + redact(l.replace(/\s+/g, ' '), book.aliasFor)).join('\n');
   await addAliases(book.added);
-  const out = await structured({ kind: 'language', model: 'claude-haiku-5-5', system: DETECT_SYSTEM, user: text, schema: DetectOut, effort: 'low' });
+  const out = await structured({ kind: 'language', model: cheapModel(await getSettings()), system: DETECT_SYSTEM, user: text, schema: DetectOut, effort: 'low' });
   return out.lang;
 }
 

@@ -62,7 +62,7 @@
 div.f{display:grid;gap:5px}
 div.f > .lb{font-size:12.5px;font-weight:600;color:var(--ink-2)}
 
-/* AI setup: Claude Code login or API key */
+/* AI connection: provider picker */
 .prov{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px}
 .prov-opt{display:flex;align-items:flex-start;gap:9px;border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;cursor:pointer;background:var(--s0)}
 .prov-opt:has(input:checked){border-color:var(--brand-line);background:var(--brand-soft)}
@@ -74,7 +74,16 @@ div.f > .lb{font-size:12.5px;font-weight:600;color:var(--ink-2)}
 .banner code,.prov-box code{font-family:var(--mono,ui-monospace,monospace);font-size:11.5px;background:var(--code-bg);padding:1px 4px;border-radius:4px}
 
 /* Composer: what you type is sent only when you press Send or Enter */
-.composer-wrap{display:grid;border-top:1px solid var(--line-soft);background:var(--s0)}
+.composer-wrap{display:grid;border-top:1px solid var(--line-soft);background:var(--s0);position:relative}
+
+/* @ tags: member list above the composer, tags in messages */
+.mention-pop{position:absolute;left:14px;bottom:calc(100% + 6px);z-index:20;width:min(320px,calc(100% - 28px));max-height:260px;overflow-y:auto;padding:4px;border:1px solid var(--line);border-radius:var(--r);background:var(--s0);box-shadow:var(--shadow-2,0 8px 24px rgba(0,0,0,.18))}
+.mention-pop[hidden]{display:none}
+.mention-opt{display:flex;align-items:center;gap:9px;width:100%;min-width:0;padding:6px 8px;border:0;border-radius:6px;background:transparent;color:var(--ink);font:inherit;font-size:13px;text-align:left;cursor:pointer}
+.mention-opt:hover,.mention-opt[aria-selected="true"]{background:var(--s2)}
+.mention-opt .av{width:26px;height:26px;border-radius:7px;font-size:11px;box-shadow:none}
+.mention-opt .kv{color:var(--ink-3);font-size:11.5px}
+.mention{color:var(--brand);font-weight:600}
 .composer-wrap > .composer{border-top:0}
 .composer > .icon-btn{flex:none;align-self:flex-end;margin-bottom:1px}
 .composer textarea:disabled{opacity:.7;cursor:not-allowed}
@@ -246,3 +255,21 @@ pre.db-cmd{margin:0;white-space:pre-wrap;max-height:180px;overflow:auto}
 .ct-opt:hover{background:var(--s1)}
 .ct-opt input{margin-top:3px;accent-color:var(--brand)}
 .ct-opt .od-fill{display:grid;gap:1px;min-width:0}
+
+/* AI connection: provider groups, local models, setup guides */
+.prov-group{grid-column:1/-1;margin:6px 0 -2px;font-size:11px;font-weight:650;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-4)}
+.prov-group:first-child{margin-top:0}
+.prov-opt .beta{margin-left:4px}
+.local-models{display:grid;gap:6px}
+.lm{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;align-items:center;border:1px solid var(--line);border-radius:var(--r);padding:9px 12px;background:var(--s0)}
+.lm.on{border-color:var(--brand-line);background:var(--brand-soft)}
+.lm b{font-size:13px;font-weight:650}
+.lm .kv{grid-column:1}
+.lm .acts{grid-row:1 / span 2;grid-column:2;display:flex;gap:6px;align-items:center}
+a.btn{text-decoration:none}
+.guide{display:grid;gap:8px;border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;background:var(--s1)}
+.guide > b{font-size:13px;font-weight:650}
+.guide a{color:var(--brand-text)}
+.prov-opt .found{font-size:11.5px;font-weight:600;color:var(--ok-text)}
+.prov-opt .found.none{color:var(--ink-4);font-weight:500}
+.howto{margin:0;padding-left:20px;display:grid;gap:4px;font-size:12.5px;color:var(--ink-2)}

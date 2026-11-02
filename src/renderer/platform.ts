@@ -45,8 +45,8 @@ const WIN_ID: Record<string, string> = {
   "WA Turbo's database files are missing. Reinstall WA Turbo.": 'File database WA Turbo tidak ada. Pasang ulang WA Turbo.',
   'WA Turbo was started "as administrator", and its database refuses to run that way. Close it and open it normally.':
     'WA Turbo dijalankan "sebagai administrator", dan databasenya menolak berjalan seperti itu. Tutup, lalu buka seperti biasa.',
-  'Claude Code was installed in a way WA Turbo cannot start. Reinstall it with the installer from claude.ai, then check again in Settings.':
-    'Claude Code terpasang dengan cara yang tidak bisa dijalankan WA Turbo. Pasang ulang dengan installer dari claude.ai, lalu cek lagi di Pengaturan.',
+  'Claude Code was installed in a way WA Turbo cannot start. Reinstall it with its installer, then check again in Settings.':
+    'Claude Code terpasang dengan cara yang tidak bisa dijalankan WA Turbo. Pasang ulang dengan installernya, lalu cek lagi di Pengaturan.',
 };
 
 /** Main-process messages worded with HERE, on either platform. */

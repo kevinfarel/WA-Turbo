@@ -37,7 +37,7 @@ export class WaManager extends EventEmitter<ManagerEvents> {
   }
 
   /** A message the person typed and sent from the chat window. */
-  async send(accountId: string, chatJid: string, body: { text: string; image?: { buf: Buffer; mime: string } }): Promise<string> {
+  async send(accountId: string, chatJid: string, body: { text: string; image?: { buf: Buffer; mime: string }; mentions?: string[] }): Promise<string> {
     const s = this.sessions.get(accountId);
     if (!s) throw new Error('This number is not linked on ' + HERE + '.');
     return s.send(chatJid, body);

@@ -1,8 +1,9 @@
 import { execFile, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter, dirname, isAbsolute, join } from 'node:path';
+import { join } from 'node:path';
 import { dataDir, HERE } from '../config';
+import { cliEnv as baseEnv, cliFinder, launcher as cliLauncher } from './cli';
 import { AiError } from './errors';
 
 // Reaches Claude through the Claude Code CLI signed in on this computer, so runs count against the
@@ -24,51 +25,15 @@ const CANDIDATES = WIN
       '/usr/local/bin/claude',
     ];
 
-let found: Promise<string | null> | null = null;
+const finder = cliFinder('claude', CANDIDATES);
 
-/**
- * Path of the `claude` binary. Apps opened from Finder don't get the shell's PATH, so ask a login shell first;
- * on Windows ask `where`. Then the installers' default folders: on Windows a PATH change made after you
- * signed in doesn't reach apps started from the Start menu.
- */
-export function findClaude(): Promise<string | null> {
-  found ??= new Promise<string | null>(resolve => {
-    const [cmd, args]: [string, string[]] = WIN ? ['where.exe', ['claude']] : ['/bin/zsh', ['-lc', 'command -v claude']];
-    execFile(cmd, args, { timeout: 8000, windowsHide: true }, (err, out) => {
-      const fromShell = err ? [] : out.trim().split(/\r?\n/);
-      // `where` lists every match; the .exe beats an npm .cmd shim.
-      if (WIN) fromShell.sort((a, b) => Number(/\.exe$/i.test(b)) - Number(/\.exe$/i.test(a)));
-      // npm also puts an extensionless bash shim next to claude.cmd; Windows can't start that one.
-      const runnable = (p: string) => isAbsolute(p) && (!WIN || /\.(exe|cmd)$/i.test(p)) && existsSync(p);
-      resolve([...(WIN ? fromShell : fromShell.slice(-1)), ...CANDIDATES].find(runnable) ?? null);
-    });
-  });
-  return found;
-}
+/** Path of the `claude` binary (see cliFinder for where it looks). */
+export const findClaude = finder.find;
+export const forgetClaude = finder.forget;
+export const launcher = (bin: string) => cliLauncher(bin, 'Claude Code');
 
-/**
- * How to start the CLI. A Windows .cmd shim can only run through cmd.exe, which would re-parse the JSON schema
- * and system prompt arguments, so the shim's own target is started instead: a .exe directly, a .js with
- * Electron running as Node.
- */
-export function launcher(bin: string): { file: string; pre: string[]; asNode: boolean } {
-  if (!/\.cmd$/i.test(bin)) return { file: bin, pre: [], asNode: false };
-  const targets = [...readFileSync(bin, 'utf8').matchAll(/"%(?:~dp0|dp0)%\\([^"]+\.(?:js|exe))"/gi)].map(m => join(dirname(bin), m[1]));
-  const target = targets.find(t => existsSync(t));
-  if (!target) throw new AiError('Claude Code was installed in a way WA Turbo cannot start. Reinstall it with the installer from claude.ai, then check again in Settings.', 'no_key');
-  return /\.exe$/i.test(target) ? { file: target, pre: [], asNode: false } : { file: process.execPath, pre: [target], asNode: true };
-}
-
-export const forgetClaude = (): void => { found = null; };
-
-function cliEnv(): NodeJS.ProcessEnv {
-  const e = { ...process.env };
-  // An API key in the environment would make the CLI bill that key instead of the signed-in plan.
-  for (const k of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'ELECTRON_RUN_AS_NODE']) delete e[k];
-  const extra = WIN ? [join(homedir(), '.local', 'bin')] : ['/opt/homebrew/bin', '/usr/local/bin', join(homedir(), '.local/bin')];
-  e.PATH = [e.PATH ?? e.Path, ...extra].filter(Boolean).join(delimiter);
-  return e;
-}
+// An API key in the environment would make the CLI bill that key instead of the signed-in plan.
+const cliEnv = (asNode = false) => baseEnv(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT'], asNode);
 
 export interface ClaudeCodeStatus { installed: boolean; loggedIn: boolean; account: string | null }
 
@@ -79,7 +44,7 @@ export async function claudeCodeStatus(): Promise<ClaudeCodeStatus> {
     // Exits non-zero when signed out but still prints the JSON.
     let l: ReturnType<typeof launcher>;
     try { l = launcher(bin); } catch { resolve(''); return; }
-    const env = { ...cliEnv(), ...(l.asNode ? { ELECTRON_RUN_AS_NODE: '1' } : {}) };
+    const env = cliEnv(l.asNode);
     execFile(l.file, [...l.pre, 'auth', 'status'], { timeout: 15000, env, windowsHide: true }, (_err, stdout) => resolve(stdout));
   });
   try {
@@ -126,7 +91,7 @@ export async function runClaudeCode(o: {
   ];
 
   return new Promise<ClaudeCodeResult>((resolve, reject) => {
-    const env = { ...cliEnv(), ...(l.asNode ? { ELECTRON_RUN_AS_NODE: '1' } : {}) };
+    const env = cliEnv(l.asNode);
     const child = spawn(l.file, [...l.pre, ...args], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     let stdout = '', stderr = '', ended: AiError | null = null;
     const stop = (err: AiError) => { ended = err; child.kill('SIGTERM'); };

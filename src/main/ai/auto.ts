@@ -1,13 +1,16 @@
+import { activeModel, FREE_CAP, FREE_WINDOW_MS, isClaude, PROVIDERS } from '@shared/ai';
 import type { AutoStatus } from '@shared/types';
-import { autoCandidates, getSettings, markAutoChecked } from '../db/queries';
-import { dueAt, runOrder } from './schedule';
+import { autoCandidates, autoRunsSince, getSettings, markAutoChecked } from '../db/queries';
+import { capWait, dueAt, nextMidnight, runOrder } from './schedule';
 import { AiError } from './errors';
 import { summarizeChat } from './summarize';
 
 // Auto summary. A new, edited or deleted message puts its chat on the changed list; one timer wakes
 // for the next chat that is due. With nothing changed there is no timer and nothing runs. Runs go
 // one at a time, pinned chats first. Pinned chats get a saved summary the AI panel shows; other
-// chats only refresh their SUM UP! loops. Nothing here can send a WhatsApp message.
+// chats only refresh their SUM UP! loops. On the free providers at most FREE_CAP chats run in any 10 minutes,
+// and Gemini and Antigravity also stop for the day after Settings.autoDailyBudget runs, so the free quota
+// keeps room for the person's own Summarize clicks. Nothing here can send a WhatsApp message.
 
 export interface AutoHooks {
   isConnected: () => Promise<boolean>;
@@ -27,6 +30,8 @@ class AutoSummary {
   private waiting = 0; // changed chats that will actually run under the current settings
   private on = false;
   private hooks: AutoHooks | null = null;
+  /** When recent auto runs started, for the free providers' cap. */
+  private recent: number[] = [];
 
   /** Rebuilds the changed list from the database (chats newer than their last auto look) and schedules. */
   async start(hooks: AutoHooks): Promise<void> {
@@ -94,16 +99,18 @@ class AutoSummary {
       for (const c of due) {
         s = await getSettings();
         if (!s.autoOn) break;
+        if (await this.overBudget(s)) break;
         this.running = c.id;
         this.emit();
+        this.recent.push(Date.now());
         try {
-          await summarizeChat(c.id, s.model, { window: { auto: c.pinned ? s.pinWindow : s.otherWindow }, auto: true, save: c.pinned }, 'auto:' + c.id, () => {});
+          await summarizeChat(c.id, activeModel(s), { window: { auto: c.pinned ? s.pinWindow : s.otherWindow }, auto: true, save: c.pinned }, 'auto:' + c.id, () => {});
           await markAutoChecked(c.id, c.rev);
           this.hooks?.onRan(c.id, c.pinned);
         } catch (e) {
           if (e instanceof AiError && e.code === 'rate_limited') {
-            this.pausedUntil = Date.now() + PAUSE_MS;
-            this.pausedWhy = 'Your Claude plan is at its usage limit.';
+            this.pausedUntil = e.retryAt ?? Date.now() + PAUSE_MS;
+            this.pausedWhy = isClaude(s.provider) ? 'Your Claude plan is at its usage limit.' : e.message;
             break;
           }
           if (e instanceof AiError && (e.code === 'no_key' || e.code === 'bad_key')) { this.changed.clear(); break; }
@@ -116,6 +123,30 @@ class AutoSummary {
       this.busy = false;
       await this.schedule();
     }
+  }
+
+  /** Free providers: holds the next run back once the cap or today's budget is reached. */
+  private async overBudget(s: Awaited<ReturnType<typeof getSettings>>): Promise<boolean> {
+    const info = PROVIDERS[s.provider];
+    const now = Date.now();
+    if (!info.free) return false;
+    this.recent = this.recent.filter(t => now - t < FREE_WINDOW_MS);
+    const wait = capWait(this.recent, now, FREE_CAP, FREE_WINDOW_MS);
+    if (wait > 0) {
+      this.pausedUntil = now + wait;
+      this.pausedWhy = `On a free AI, auto summary runs at most ${FREE_CAP} chats every 10 minutes.`;
+      return true;
+    }
+    if (info.quota && s.autoDailyBudget > 0) {
+      const midnight = nextMidnight(now);
+      const used = await autoRunsSince(s.provider + ':', midnight - 24 * 3600_000);
+      if (used >= s.autoDailyBudget) {
+        this.pausedUntil = midnight;
+        this.pausedWhy = `Auto summary used today's ${s.autoDailyBudget} runs on the free plan. Summarize still works.`;
+        return true;
+      }
+    }
+    return false;
   }
 }
 

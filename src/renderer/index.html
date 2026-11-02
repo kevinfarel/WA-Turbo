@@ -44,7 +44,7 @@
 
     <div class="title-right">
       <button type="button" class="ai-chip" id="aiChip" data-on="false" aria-describedby="aiChipHint">
-        <span class="dot" aria-hidden="true"></span><span id="aiChipLabel">Claude not connected</span>
+        <span class="dot" aria-hidden="true"></span><span id="aiChipLabel">AI not connected</span>
       </button>
       <span id="aiChipHint" class="vh">Opens Settings</span>
       <button type="button" class="icon-btn theme-btn" id="themeToggle" aria-label="Switch between light and dark mode" title="Switch between light and dark mode">
@@ -177,7 +177,7 @@
       <div class="set-wrap">
         <header>
           <h1>Settings</h1>
-          <p>Claude, auto summary and notifications. WA Turbo reads your chats locally and sends only the selected messages to the model you connect here.</p>
+          <p>AI connection, auto summary and notifications. WA Turbo reads your chats locally and sends only the selected messages to the AI you connect here.</p>
         </header>
 
         <div class="fs" id="appearanceBlock">
@@ -211,20 +211,44 @@
 
         <div class="fs" id="langBlock">
           <h2>Summary language</h2>
-          <p class="hint">The language Claude writes in for each linked number: summaries, SUM UP! cards and report overviews. When a number is linked, WA Turbo reads its first 10 conversations once Claude is connected and picks English or Bahasa Indonesia; change it here any time. Summaries already written keep their language until you summarize again.</p>
+          <p class="hint">The language the AI writes in for each linked number: summaries, SUM UP! cards and report overviews. When a number is linked, WA Turbo reads its first 10 conversations once an AI is connected and picks English or Bahasa Indonesia; change it here any time. Summaries already written keep their language until you summarize again.</p>
           <ul class="lang-list" id="langList"></ul>
         </div>
 
         <div class="fs">
-          <h2>Claude connection</h2>
-          <div class="prov" role="radiogroup" aria-label="How WA Turbo reaches Claude">
+          <h2>AI connection</h2>
+          <p class="hint">How WA Turbo reaches an AI for summaries, reports and SUM UP!. Only the messages you summarize are sent, and only to the one you pick here.</p>
+          <div class="prov" role="radiogroup" aria-label="How WA Turbo reaches an AI">
+            <p class="prov-group">With a subscription</p>
             <label class="prov-opt">
               <input type="radio" name="provider" value="claude-code" checked>
               <span><b>Claude Code login</b><span class="kv">Uses your Claude plan. No separate billing.</span></span>
             </label>
             <label class="prov-opt">
+              <input type="radio" name="provider" value="codex">
+              <span><b>ChatGPT (Codex) <span class="beta">Experimental</span></b><span class="kv">Uses your ChatGPT Plus or higher plan.</span></span>
+            </label>
+            <label class="prov-opt">
+              <input type="radio" name="provider" value="antigravity">
+              <span><b>Google (Antigravity) <span class="beta">Experimental</span></b><span class="kv">Free Google account or Google AI Pro. Text only.</span></span>
+            </label>
+            <p class="prov-group">Free</p>
+            <label class="prov-opt">
+              <input type="radio" name="provider" value="local">
+              <span><b>Local model</b><span class="kv">Qwen, Gemma or another model you run with Ollama. Private and offline.</span><span class="found" id="localFound" hidden></span></span>
+            </label>
+            <label class="prov-opt">
+              <input type="radio" name="provider" value="gemini">
+              <span><b>Gemini free key</b><span class="kv">Free from Google. Google may use the messages.</span></span>
+            </label>
+            <p class="prov-group">Pay per use</p>
+            <label class="prov-opt">
               <input type="radio" name="provider" value="api">
               <span><b>Anthropic API key</b><span class="kv">Billed separately, per token.</span></span>
+            </label>
+            <label class="prov-opt">
+              <input type="radio" name="provider" value="openai">
+              <span><b>Other (OpenAI-compatible)</b><span class="kv">Groq, OpenRouter, OpenAI or any compatible address.</span></span>
             </label>
           </div>
 
@@ -271,12 +295,139 @@
             <span><b>Connected.</b> Summaries and reports are available in the inbox and the Reports tab.</span>
           </div>
           </div>
+
+          <div class="prov-box" id="localBox" hidden>
+            <p class="hint">WA Turbo uses a model you already run on this computer with Ollama, such as Qwen or Gemma. What you summarize never leaves the computer, and it works offline. Local models are slower than Claude and read a little less well; one that lists "vision" can also see photos.</p>
+            <div class="od-row" style="--od-gap:8px">
+              <button type="button" class="btn btn-primary" id="checkLocal">Check again</button>
+              <button type="button" class="btn" id="diagLocal">Copy diagnostics</button>
+              <span class="od-fill"></span>
+              <span class="kv" id="localState">Looking for Ollama…</span>
+            </div>
+            <div class="local-models" id="localModels"></div>
+            <div class="guide" id="localGuide" hidden>
+              <b>No local model found yet</b>
+              <ol class="howto">
+                <li>Install Ollama from <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com/download</a> and open it.</li>
+                <li>In Terminal (Command Prompt on Windows), run <code>ollama pull qwen3.5:4b</code>. It downloads about 3.5 GB once; <code>gemma4:e4b</code> reads better if you have 16 GB of memory.</li>
+                <li>Press Check again. WA Turbo finds the model and picks it.</li>
+              </ol>
+            </div>
+          </div>
+
+          <div class="prov-box" id="geminiBox" hidden>
+            <p class="hint">Gemini is free with a key from Google AI Studio: no card, no subscription. It reads Bahasa Indonesia well and can see photos. Google sets a daily limit on free keys.</p>
+            <div class="guide">
+              <b>Get your free key in 2 minutes</b>
+              <ol class="howto">
+                <li>Press <b>Open Google AI Studio</b> below. It opens aistudio.google.com/apikey in your browser.</li>
+                <li>Sign in with any Google account (your Gmail works). The first time, accept Google's terms.</li>
+                <li>Press <b>Create API key</b>. If it asks for a project, pick <b>Create API key in new project</b>.</li>
+                <li>Copy the key. It starts with <code>AIza</code>.</li>
+                <li>Come back here, tick the box under the warning, paste the key and press <b>Test connection</b>.</li>
+              </ol>
+              <div class="od-row" style="--od-gap:8px">
+                <a class="btn" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Open Google AI Studio</a>
+                <span class="kv">Keep the key private. You can delete it in AI Studio any time.</span>
+              </div>
+            </div>
+            <div class="banner warn">
+              <svg class="od-icon" style="--od-icon-size:16px;margin-top:1px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0"/></svg>
+              <span><b>Google may use these messages.</b> On the free tier, Google can use what WA Turbo sends, including the WhatsApp messages you summarize, to improve its products, and people at Google may read it. This applies outside the EU, UK and Switzerland, so it includes Indonesia. Use "Local model" to keep chats private.</span>
+            </div>
+            <label class="ck-row"><input type="checkbox" id="geminiAgreed"> <span>I understand, and I'm allowed to send these chats to Google</span></label>
+            <div class="inline-row">
+              <label class="f">
+                <span class="lb">Gemini API key</span>
+                <input type="password" id="geminiKey" class="mono" placeholder="AIza..." autocomplete="off" spellcheck="false" aria-describedby="geminiErr">
+              </label>
+            </div>
+            <label class="f">
+              <span class="lb">Model</span>
+              <input type="text" id="geminiModel" class="mono" placeholder="gemini-flash-latest" autocomplete="off" spellcheck="false">
+              <span class="hp">Leave empty for Gemini Flash, Google's current fast model.</span>
+            </label>
+            <p class="err" id="geminiErr" hidden></p>
+            <div class="od-row" style="--od-gap:8px">
+              <button type="button" class="btn btn-primary" id="testGemini">Test connection</button>
+              <button type="button" class="btn" id="disconnectGemini" hidden>Disconnect</button>
+              <span class="od-fill"></span>
+              <span class="kv" id="geminiState">Not connected</span>
+            </div>
+          </div>
+
+          <div class="prov-box" id="openaiBox" hidden>
+            <p class="hint">Any service that speaks the OpenAI chat format with JSON output, for example Groq (https://api.groq.com/openai/v1), OpenRouter (https://openrouter.ai/api/v1) or OpenAI (https://api.openai.com/v1). Free hosts may keep what you send.</p>
+            <label class="f">
+              <span class="lb">Address</span>
+              <input type="text" id="openaiBaseUrl" class="mono" placeholder="https://api.groq.com/openai/v1" autocomplete="off" spellcheck="false">
+            </label>
+            <label class="f">
+              <span class="lb">Model</span>
+              <input type="text" id="openaiModel" class="mono" placeholder="the service's model name" autocomplete="off" spellcheck="false">
+            </label>
+            <label class="f">
+              <span class="lb">API key</span>
+              <input type="password" id="openaiKey" class="mono" placeholder="leave empty if the service needs none" autocomplete="off" spellcheck="false" aria-describedby="openaiErr">
+            </label>
+            <p class="err" id="openaiErr" hidden></p>
+            <div class="od-row" style="--od-gap:8px">
+              <button type="button" class="btn btn-primary" id="testOpenai">Test connection</button>
+              <button type="button" class="btn" id="disconnectOpenai" hidden>Forget key</button>
+              <span class="od-fill"></span>
+              <span class="kv" id="openaiState">Not connected</span>
+            </div>
+          </div>
+
+          <div class="prov-box" id="agyBox" hidden>
+            <div class="banner info"><span><b>Experimental.</b> This hasn't been tried on a real sign-in yet. If something goes wrong, press Copy diagnostics and send it to whoever gave you WA Turbo. It holds no message text.</span></div>
+            <p class="hint">WA Turbo runs Google's Antigravity CLI (agy) signed in on this computer, in an empty folder, with every tool that needs approval refused. A free Google account has a weekly limit; Google AI Pro and Ultra have more. Photos are not sent: its headless mode takes text only.</p>
+            <ol class="howto">
+              <li>Install the Antigravity CLI from antigravity.google.</li>
+              <li>Open Terminal, run <code>agy</code> and sign in with Google.</li>
+              <li>Press Check again. It sends one tiny request.</li>
+            </ol>
+            <label class="f">
+              <span class="lb">Model</span>
+              <input type="text" id="agyModel" class="mono" placeholder="Antigravity's default" autocomplete="off" spellcheck="false">
+              <span class="hp">Leave empty for the default. <code>agy models</code> in Terminal lists the others.</span>
+            </label>
+            <div class="od-row" style="--od-gap:8px">
+              <button type="button" class="btn btn-primary" id="checkAgy">Check again</button>
+              <button type="button" class="btn" id="diagAgy">Copy diagnostics</button>
+              <span class="od-fill"></span>
+              <span class="kv" id="agyState">Not connected</span>
+            </div>
+            <p class="err" id="agyErr" hidden></p>
+          </div>
+
+          <div class="prov-box" id="codexBox" hidden>
+            <div class="banner info"><span><b>Experimental.</b> This hasn't been tried on a real sign-in yet. If something goes wrong, press Copy diagnostics and send it to whoever gave you WA Turbo. It holds no message text.</span></div>
+            <p class="hint">WA Turbo runs OpenAI's Codex CLI signed in with your ChatGPT plan, in an empty folder with a read-only sandbox, and nothing is saved to Codex's history. The CLI needs ChatGPT Plus or higher; the free plan doesn't include it.</p>
+            <ol class="howto">
+              <li>Install Codex: <code>npm install -g @openai/codex</code> or <code>brew install codex</code>.</li>
+              <li>Run <code>codex login</code> in Terminal and sign in with ChatGPT.</li>
+              <li>Press Check again.</li>
+            </ol>
+            <label class="f">
+              <span class="lb">Model</span>
+              <input type="text" id="codexModel" class="mono" placeholder="Codex's default" autocomplete="off" spellcheck="false">
+              <span class="hp">Leave empty for your plan's default model.</span>
+            </label>
+            <div class="od-row" style="--od-gap:8px">
+              <button type="button" class="btn btn-primary" id="checkCodex">Check again</button>
+              <button type="button" class="btn" id="diagCodex">Copy diagnostics</button>
+              <span class="od-fill"></span>
+              <span class="kv" id="codexState">Not connected</span>
+            </div>
+            <p class="err" id="codexErr" hidden></p>
+          </div>
         </div>
 
         <div class="fs">
           <h2>Model</h2>
-          <label class="f">
-            <span class="lb">Summarization model</span>
+          <label class="f" id="claudeModelRow">
+            <span class="lb">Claude model</span>
             <select id="model">
               <option value="claude-haiku-5-5" selected>Claude Haiku 5.5 — fastest and cheapest, default</option>
               <option value="claude-sonnet-5-5">Claude Sonnet 5.5 — balanced</option>
@@ -284,6 +435,7 @@
             </select>
             <span class="hp">Through Claude Code, runs use your plan's limits; Opus uses them fastest. With an API key, Haiku 5.5 costs $0.10 / $0.50 per million tokens in and out. Client-facing summaries read better on Opus.</span>
           </label>
+          <p class="hint" id="otherModelNote" hidden>The model for this connection is picked under AI connection above.</p>
           <label class="f">
             <span class="lb">Summarize reads</span>
             <select id="window" aria-describedby="windowHelp">
@@ -294,19 +446,19 @@
             </select>
             <span class="hp" id="windowHelp">What the Summarize button reads. This week starts Monday 00:00 on this Mac's clock and reads at most the newest 300. Only these messages are sent: their text, and the most recent photos if allowed below.</span>
           </label>
-          <label class="ck-row"><input type="checkbox" id="aiImages" checked> <span>Let Claude see photos in the chat (the 10 most recent per chat)</span></label>
+          <label class="ck-row"><input type="checkbox" id="aiImages" checked> <span>Let the AI see photos in the chat (the 10 most recent per chat)</span></label>
           <p class="hint" style="margin-top:-8px">Photos are sent as they are, so a phone number or name inside a photo is not hidden. Turn this off to send text only.</p>
         </div>
 
         <div class="fs" id="usageBlock">
           <div class="usage-head">
-            <h2 class="od-fill">Claude usage</h2>
+            <h2 class="od-fill">AI usage</h2>
             <div class="usage-seg" role="group" aria-label="Show usage by">
               <button type="button" class="chip" data-usage="day" aria-pressed="true">Daily</button>
               <button type="button" class="chip" data-usage="week" aria-pressed="false">Weekly</button>
             </div>
           </div>
-          <p class="hint">Tokens Claude read and wrote for each number: input, cached input and output together. Through the Claude Code login they count toward your plan's limits, with no separate bill.</p>
+          <p class="hint">Tokens the AI read and wrote for each number: input, cached input and output together. Through a plan login (Claude Code, Codex, Antigravity) they count toward the plan's limits, with no separate bill. A local model costs nothing.</p>
           <div class="usage-tiles" id="usageTiles"></div>
           <div class="usage-legend" id="usageLegend"></div>
           <div class="usage-chart" id="usageChart"></div>
@@ -316,7 +468,7 @@
 
         <div class="fs" id="autoBlock">
           <h2>Auto summary</h2>
-          <p class="hint">WA Turbo summarizes chats on its own when they have new messages. Pinned chats get a fresh summary in the AI panel; other chats get their SUM UP! loops checked. A chat with nothing new is never sent to Claude.</p>
+          <p class="hint">WA Turbo summarizes chats on its own when they have new messages. Pinned chats get a fresh summary in the AI panel; other chats get their SUM UP! loops checked. A chat with nothing new is never sent to the AI.</p>
           <label class="ck-row"><input type="checkbox" id="autoOn" checked> <span>Summarize chats automatically</span></label>
           <div class="auto-grid">
             <span class="lbl"><b>Pinned chats</b><span id="autoPinned">No pinned chats</span></span>
@@ -334,8 +486,16 @@
               <option value="2" selected>Last 2 messages</option><option value="5">Last 5 messages</option><option value="10">Last 10 messages</option>
               <option value="20">Last 20 messages</option><option value="50">Last 50 messages</option></select></label>
           </div>
+          <label class="f" id="budgetRow" hidden>
+            <span class="lb">Free daily budget for auto summary</span>
+            <select id="autoDailyBudget">
+              <option value="25">25 runs a day</option><option value="50">50 runs a day</option><option value="100" selected>100 runs a day</option>
+              <option value="200">200 runs a day</option><option value="400">400 runs a day</option><option value="0">No limit</option>
+            </select>
+            <span class="hp">On Gemini and Antigravity, auto summary stops for the day after this many runs, so the free quota keeps room for your own Summarize clicks. About half of your key's daily limit works well (AI Studio → Usage shows it).</span>
+          </label>
           <p class="kv" id="autoState" role="status">Checking…</p>
-          <p class="hint" style="margin-top:-8px">Runs on your Claude plan, one chat at a time, pinned first. Pauses for 30 minutes if the plan reaches its usage limit. Groups you never write in are skipped unless pinned.</p>
+          <p class="hint" style="margin-top:-8px" id="autoNote">Runs on your Claude plan, one chat at a time, pinned first. Pauses for 30 minutes if the plan reaches its usage limit. Groups you never write in are skipped unless pinned.</p>
         </div>
 
         <div class="fs" id="notifyBlock">
@@ -422,8 +582,8 @@
           <h2>FAQ</h2>
           <p class="hint">How WA Turbo behaves, in plain terms.</p>
           <div class="faq-glance">
-            <div><b>Sent to Claude</b><span>Message text and the most recent photos, inside the window you choose.</span></div>
-            <div><b>Never sent to Claude</b><span>Voice notes, videos, documents, stickers and locations.</span></div>
+            <div><b>Sent to the AI</b><span>Message text and the most recent photos, inside the window you choose.</span></div>
+            <div><b>Never sent to the AI</b><span>Voice notes, videos, documents, stickers and locations.</span></div>
             <div><b>Sent to WhatsApp</b><span>Only what you type or attach and send yourself.</span></div>
           </div>
           <div class="faq" style="margin-top:9px">
@@ -443,19 +603,19 @@
             <details>
               <summary>Where do my messages go?</summary>
               <div class="fa">
-                <p>Chats stay on this Mac, in the database built into WA Turbo. Only what you select for a summary or report is sent, to Anthropic, either through the Claude Code app signed in on this Mac or with the API key you entered — there is no WA Turbo server in between. Phone numbers in the text are swapped for stable aliases before the request leaves the Mac. Photos are sent as they are, so a number or name inside a photo is not hidden. Generated reports are written locally and are not synced anywhere.</p>
+                <p>Chats stay on this Mac, in the database built into WA Turbo. Only what you select for a summary or report is sent, and only to the AI you picked in Settings: Anthropic (Claude Code or an API key), Google (a Gemini key or Antigravity), OpenAI (Codex) or the service you entered. With "Local model" nothing leaves the Mac at all. There is no WA Turbo server in between. Phone numbers in the text are swapped for stable aliases before the request leaves the Mac. Photos are sent as they are, so a number or name inside a photo is not hidden. Generated reports are written locally and are not synced anywhere.</p>
               </div>
             </details>
             <details>
               <summary>Can WA Turbo send a message?</summary>
               <div class="fa">
-                <p><b>Only when you send it.</b> Type in the box under a chat, or attach a photo, and press Send or Enter. Nothing is ever sent on its own: no automatic replies, no scheduled messages, and Claude never writes or sends a message. WA Turbo also never sends read receipts or your online status. Nudge in SUM UP! only records that you followed up.</p>
+                <p><b>Only when you send it.</b> Type in the box under a chat, or attach a photo, and press Send or Enter. Nothing is ever sent on its own: no automatic replies, no scheduled messages, and the AI never writes or sends a message. WA Turbo also never sends read receipts or your online status. Nudge in SUM UP! only records that you followed up.</p>
               </div>
             </details>
             <details>
               <summary>How does SUM UP! find open loops?</summary>
               <div class="fa">
-                <p>Simple rules run on this Mac as messages arrive: a question or request to you, your own ask, or your own promise. Nothing is sent anywhere to do that. Those loops carry an "auto" tag and a Not a loop button. When you summarize the chat, Claude reviews them and can dismiss false ones.</p>
+                <p>Simple rules run on this Mac as messages arrive: a question or request to you, your own ask, or your own promise. Nothing is sent anywhere to do that. Those loops carry an "auto" tag and a Not a loop button. When you summarize the chat, the AI reviews them and can dismiss false ones.</p>
                 <p>The rules also close loops on their own: when you replied and the other side then said thanks, ok or noted, the loop closes and says why. The same question sent twice counts as one loop they chased.</p>
               </div>
             </details>
@@ -521,7 +681,7 @@
     <div class="bd">
       <div class="banner bad" id="repNoKey" hidden>
         <svg class="od-icon" style="--od-icon-size:16px;margin-top:1px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v5M12 17.5v.01"/><circle cx="12" cy="12" r="9"/></svg>
-        <span><b>Claude is not connected.</b> Sign in to Claude Code or add an API key in Settings, then generate.</span>
+        <span><b>No AI is connected.</b> Pick an AI connection in Settings, then generate.</span>
       </div>
       <div class="inline-row">
         <label class="f">
@@ -539,7 +699,7 @@
       </div>
       <label class="f" id="repCustomWrap" hidden>
         <span class="lb">Custom prompt <span class="req" aria-hidden="true">*</span><span class="vh">required</span></span>
-        <textarea class="ta" id="repCustom" placeholder="What should Claude pull out of these chats?" aria-describedby="repCustomErr"></textarea>
+        <textarea class="ta" id="repCustom" placeholder="What should the AI pull out of these chats?" aria-describedby="repCustomErr"></textarea>
         <p class="err" id="repCustomErr" hidden></p>
       </label>
       <div>
