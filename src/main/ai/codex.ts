@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { TERMINAL } from '../config';
 import { cliEnv, cliFinder, lastLine, launcher, runCli } from './cli';
 import { recordDiag, runFolder, scrubArgs } from './diag';
 import { AiError } from './errors';
@@ -44,7 +45,7 @@ export function parseCodex(stdout: string): CodexEvents {
 }
 
 export function codexError(text: string): AiError {
-  if (/not logged in|log ?in|unauthori[sz]ed|401|sign ?in/i.test(text)) return new AiError('Codex is signed out. Open Terminal, run codex login, then press Check again in Settings.', 'no_key');
+  if (/not logged in|log ?in|unauthori[sz]ed|401|sign ?in/i.test(text)) return new AiError(`Codex is signed out. Open ${TERMINAL}, run codex login, then press Check again in Settings.`, 'no_key');
   if (/usage limit|rate.?limit|429|limit reached/i.test(text)) return new AiError('Your ChatGPT plan is at its Codex usage limit. ' + text, 'rate_limited', Date.now() + 30 * 60_000);
   if (/model .*(not (found|supported|available))|unknown model/i.test(text)) return new AiError('Your ChatGPT plan cannot use that model in Codex. Clear the model in Settings to use its default.', 'bad_key');
   return new AiError('Codex returned an error: ' + text, 'api');
