@@ -122,6 +122,12 @@ export type AiProvider = 'claude-code' | 'api' | 'local' | 'gemini' | 'openai' |
 /** What the Summarize button reads: this week (Monday 00:00 to now, newest 300 at most) or a fixed count. */
 export type SummaryWindow = 'week' | 50 | 100 | 300;
 
+/** The word lists behind the local loop rules, as named in Settings → SUM UP! rules. */
+export type RuleGroupId = 'ask' | 'myAsk' | 'promise' | 'followUp' | 'ignore' | 'thanks' | 'okay' | 'defer';
+/** Changes to one list: built-in terms switched off (by label), and terms the person added. */
+export interface RuleEdits { off?: string[]; add?: string[] }
+export type LoopRules = Partial<Record<RuleGroupId, RuleEdits>>;
+
 export interface Settings {
   provider: AiProvider;
   /** The Claude model, used by the Claude Code login and the API key. */
@@ -167,6 +173,8 @@ export interface Settings {
   notifyPausedUntil: number;
   /** Calling code for local numbers in imported contacts ("0812…" → +62 812…). Empty = guess from the linked number. */
   contactsCountry: string;
+  /** Changes to the local loop rules. Empty means the built-in rules exactly as shipped. */
+  loopRules: LoopRules;
 }
 
 /** Where a name in the contacts import came from: the file, an earlier import, or the phone that owns the number (via WhatsApp). */

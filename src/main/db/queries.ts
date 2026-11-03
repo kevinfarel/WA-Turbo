@@ -662,7 +662,7 @@ export const DEFAULT_SETTINGS: Settings = {
   localModel: '', geminiModel: '', openaiModel: '', openaiBaseUrl: '', agyModel: '', codexModel: '', geminiAgreed: false, autoDailyBudget: 100,
   autoOn: true, pinEveryMin: 5, pinWindow: 10, otherEveryMin: 60, otherWindow: 2,
   notifyOn: true, notifyPinnedSound: 'Glass', notifyRemindMin: 10, notifyOthers: 'direct', notifyOtherSound: 'Tink', notifyPreview: true,
-  notifyBadge: 'chats', notifyOverdue: true, menuBar: true, notifyPausedUntil: 0, contactsCountry: '',
+  notifyBadge: 'chats', notifyOverdue: true, menuBar: true, notifyPausedUntil: 0, contactsCountry: '', loopRules: {},
 };
 
 export async function getSettings(): Promise<Settings> {

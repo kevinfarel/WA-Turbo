@@ -10,6 +10,7 @@ import * as Q from '../db/queries';
 import { isConnected, q1 } from '../db/client';
 import { pgHome, pgServer, portFree, PG_PORT, TOOLS_HOST } from '../db/server';
 import { flagMessage, loopAction, resolveLoops } from '../loops/service';
+import { setLoopRules } from '../loops/rules';
 import { resetClient, testKey } from '../ai/client';
 import { claudeCodeStatus, forgetClaude } from '../ai/claude-code';
 import { agyStatus, checkAgy, findAgy, forgetAgy } from '../ai/antigravity';
@@ -389,6 +390,7 @@ export function registerIpc(d: RouterDeps): void {
     saveSettings: async patch => {
       if (patch.openAtLogin !== undefined) app.setLoginItemSettings({ openAtLogin: patch.openAtLogin });
       const saved = await Q.saveSettings(patch);
+      if (patch.loopRules) setLoopRules(saved.loopRules);
       await notifier.apply(saved);
       if (['autoOn', 'pinEveryMin', 'pinWindow', 'otherEveryMin', 'otherWindow', 'provider', 'autoDailyBudget'].some(k => k in patch)) await autoSummary.schedule();
       return saved;

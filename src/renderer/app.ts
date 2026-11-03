@@ -8,6 +8,7 @@ import type { ContactImportPreview, ContactSource, ContactsInfo, DbInfo, GroupMe
 } from '@shared/types';
 import { fmtDur, loopAge, loopPending, loopSla, setDurLang, SLA_LABEL, SLA_ORDER } from '@shared/sla';
 import { EMPTY_WEEK, PRESETS } from '@shared/presets';
+import { addRuleTerm, MAX_TERM, removeRuleTerm, RULE_GROUPS, rulesChanged, toggleRuleTerm, type RuleGroup } from '@shared/rule-terms';
 import { encodeMentions, type PickedMention } from '@shared/mentions';
 import { activeModel, FREE_CAP, isClaude, modelLabel, PROVIDERS } from '@shared/ai';
 import { esc, fmtText } from './format';
@@ -1122,6 +1123,7 @@ function renderSettings(): void {
   renderAppearance();
   renderLangList();
   renderTeam();
+  renderRules();
   void loadUsage();
   void loadDb();
   void loadContacts();
@@ -1459,6 +1461,64 @@ async function setDbTools(on: boolean): Promise<void> {
   } finally {
     state.dbBusy = false; renderDb();
   }
+}
+
+/* --- SUM UP! rules --- */
+function renderRules(force = false): void {
+  const el = document.getElementById('ruleGroups'); if (!el) return;
+  // Settings redraws for many reasons; never under someone typing a word or using the keyboard here.
+  if (!force && el.contains(document.activeElement)) return;
+  const open = new Set([...el.querySelectorAll<HTMLElement>('details[open]')].map(d => d.dataset.ruleGroup));
+  const rules = state.settings.loopRules;
+  el.innerHTML = RULE_GROUPS.map(g => {
+    const off = rules[g.id]?.off ?? [], add = rules[g.id]?.add ?? [];
+    const nOff = g.terms.filter(t => off.includes(t.label)).length;
+    const counts = [(g.terms.length - nOff) + ' on', nOff ? nOff + ' off' : '', add.length ? add.length + ' added' : ''].filter(Boolean).join(' · ');
+    return '<details class="rule-grp" data-rule-group="' + g.id + '"' + (open.has(g.id) ? ' open' : '') + '>' +
+      '<summary><b>' + esc(g.title) + '</b> <span class="kv">' + counts + '</span></summary>' +
+      '<div class="rule-body"><p class="hint">' + esc(g.hint) + '</p><div class="rule-chips">' +
+      g.terms.map(t => {
+        const on = !off.includes(t.label);
+        return '<button type="button" class="rule-chip" aria-pressed="' + on + '" data-rule-term="' + esc(t.label) + '" title="' + (on ? 'Switch off' : 'Switch back on') + '"><span translate="no">' + esc(t.label) + '</span></button>';
+      }).join('') +
+      add.map(t => '<button type="button" class="rule-chip added" data-rule-added="' + esc(t) + '" title="Remove"><span translate="no">' + esc(t) + '</span>' + icon('x', 11) + '</button>').join('') +
+      '</div><div class="rule-add"><input type="text" data-rule-input maxlength="' + MAX_TERM + '" placeholder="Add a word or phrase" aria-label="Add a word or phrase">' +
+      '<button type="button" class="btn btn-sm" data-rule-add>Add</button></div></div></details>';
+  }).join('');
+  $('#rulesReset').hidden = !rulesChanged(rules);
+}
+
+let rulesSaving: Promise<unknown> = Promise.resolve();
+/** Draws at once and saves in click order, so quick clicks can't land out of order. */
+function setRules(next: Settings['loopRules']): void {
+  state.settings.loopRules = next;
+  renderRules(true);
+  rulesSaving = rulesSaving.then(() => api.saveSettings({ loopRules: next })).catch(fail);
+}
+
+const ruleBox = (g: RuleGroup): HTMLElement => document.querySelector<HTMLElement>('[data-rule-group="' + g.id + '"]')!;
+
+function addRule(g: RuleGroup): void {
+  const input = ruleBox(g).querySelector<HTMLInputElement>('[data-rule-input]')!;
+  const r = addRuleTerm(state.settings.loopRules, g, input.value);
+  if (r.status === 'empty') return;
+  if (r.status === 'exists') { toast('That word is already in this list'); input.select(); return; }
+  setRules(r.rules);
+  ruleBox(g).querySelector<HTMLInputElement>('[data-rule-input]')!.focus();
+  if (r.status === 'restored') toast('Switched back on', 'ok');
+}
+
+function ruleClick(b: HTMLElement): void {
+  const g = RULE_GROUPS.find(x => x.id === b.closest<HTMLElement>('[data-rule-group]')?.dataset.ruleGroup);
+  if (!g) return;
+  const { ruleTerm, ruleAdded } = b.dataset;
+  if (ruleTerm !== undefined) {
+    setRules(toggleRuleTerm(state.settings.loopRules, g.id, ruleTerm));
+    [...ruleBox(g).querySelectorAll<HTMLElement>('[data-rule-term]')].find(c => c.dataset.ruleTerm === ruleTerm)?.focus();
+  } else if (ruleAdded !== undefined) {
+    setRules(removeRuleTerm(state.settings.loopRules, g.id, ruleAdded));
+    ruleBox(g).querySelector<HTMLInputElement>('[data-rule-input]')!.focus();
+  } else addRule(g);
 }
 
 function renderTeam(): void {
@@ -1964,6 +2024,9 @@ document.addEventListener('click', e => {
   const uu = t.closest<HTMLElement>('[data-usage]');
   if (uu) { state.usageUnit = uu.dataset.usage as 'day' | 'week'; renderUsage(); return; }
 
+  const rule = t.closest<HTMLElement>('[data-rule-term],[data-rule-added],[data-rule-add]');
+  if (rule) { ruleClick(rule); return; }
+
   const unteam = t.closest<HTMLElement>('[data-unteam]');
   if (unteam) {
     void api.removeTeam(unteam.dataset.unteam!).then(async list => {
@@ -2012,6 +2075,7 @@ document.addEventListener('click', e => {
     case 'resummarize': void runSummary({ force: true }); return;
     case 'summarize50': void runSummary({ window: 50 }); return;
     case 'pinBtn': { const c = chatById(state.chat); if (c) void togglePin(c); return; }
+    case 'rulesReset': confirmDlg('Reset SUM UP! rules?', 'Words you added are removed and every built-in word switches back on.', 'Reset', () => setRules({})); return;
     case 'rerunSonnet': void api.saveSettings({ model: 'claude-sonnet-5-5' }).then(s => { state.settings = s; void runSummary(); }); return;
     case 'cancelSummary': if (state.summary.chatId) void api.cancelRun('summary:' + state.summary.chatId); return;
     case 'copySummary': { const c = chatById(state.chat); if (c && state.summary.result) void copyText(summaryText(c, state.summary.result.insight), 'Summary'); return; }
@@ -2457,6 +2521,11 @@ document.addEventListener('keydown', e => {
   if ((e.target as HTMLElement).id === 'editBox' && e.key === 'Escape') { state.editing = null; renderConvoKeepScroll(); return; }
   if (e.key === 'Escape') closeAcctMenu();
   if ((e.target as HTMLElement).id === 'pairName' && e.key === 'Enter') { e.preventDefault(); void pairNext(); }
+  if ((e.target as HTMLElement).matches('[data-rule-input]') && e.key === 'Enter' && !e.isComposing) {
+    e.preventDefault();
+    const g = RULE_GROUPS.find(x => x.id === (e.target as HTMLElement).closest<HTMLElement>('[data-rule-group]')?.dataset.ruleGroup);
+    if (g) addRule(g);
+  }
   if (e.key === 'Escape' && state.panelOpen && !wide.matches && !document.querySelector('dialog[open]')) { state.panelOpen = false; syncPanel(); }
 });
 

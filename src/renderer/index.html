@@ -551,6 +551,13 @@
           <ul class="team-list" id="teamList"></ul>
         </div>
 
+        <div class="fs" id="rulesBlock">
+          <h2>SUM UP! rules</h2>
+          <p class="hint">The words that turn a message into a SUM UP! card without any AI, in English and Bahasa Indonesia. Click a word to switch it off, or add your own. Changes apply to new messages.</p>
+          <div class="rule-groups" id="ruleGroups"></div>
+          <div class="od-row" style="--od-gap:8px"><button type="button" class="btn btn-sm" id="rulesReset" hidden>Reset to defaults</button></div>
+        </div>
+
         <div class="fs" id="dbBlock">
           <h2>Database</h2>
           <p class="hint">Chats, SUM UP! cards, reports and settings are kept in a PostgreSQL database built into WA Turbo, in a folder on this Mac. Nothing needs installing and nothing is stored anywhere else.</p>
@@ -617,6 +624,7 @@
               <div class="fa">
                 <p>Simple rules run on this Mac as messages arrive: a question or request to you, your own ask, or your own promise. Nothing is sent anywhere to do that. Those loops carry an "auto" tag and a Not a loop button. When you summarize the chat, the AI reviews them and can dismiss false ones.</p>
                 <p>The rules also close loops on their own: when you replied and the other side then said thanks, ok or noted, the loop closes and says why. The same question sent twice counts as one loop they chased.</p>
+                <p>You can change the words these rules look for in Settings → SUM UP! rules.</p>
               </div>
             </details>
             <details>
