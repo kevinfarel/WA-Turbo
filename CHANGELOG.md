@@ -6,6 +6,7 @@ User-visible changes to WA Turbo. The format follows [Keep a Changelog](https://
 
 ### Added
 - Settings → SUM UP! rules: see the words the local rules look for, in eight lists (asks to you, your asks, promises, chases, short replies to skip, thanks, short OKs, and replies that aren't an answer yet). Click a word to switch it off, add your own, or reset to defaults. Out of the box the rules work exactly as before.
+- **DeepSeek** (experimental) in Settings → AI connection, under Pay per use. DeepSeek has no subscription or account login, so it runs on your API key: WA Turbo finds `DEEPSEEK_API_KEY` on the computer by itself, or you paste a key. Nothing is sent until you accept a notice that messages go to DeepSeek in China. Flash can see photos; Pro reads text only. Auto summary spends your balance and pauses for an hour if it runs out.
 
 ## [0.4.1] - 2026-11-03
 

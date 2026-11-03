@@ -9,7 +9,7 @@ import type { UiPrefs } from '@shared/types';
 // built-in Postgres over 127.0.0.1 when that is switched on. The app itself connects over a private socket.
 
 /** Providers whose key WA Turbo keeps (the Anthropic key stays in apiKeyEnc, as older versions saved it). */
-export type KeyedProvider = 'gemini' | 'openai';
+export type KeyedProvider = 'gemini' | 'deepseek' | 'openai';
 
 interface ConfigFile {
   apiKeyEnc?: string;

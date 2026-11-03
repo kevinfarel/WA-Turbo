@@ -2,17 +2,18 @@ import type { ContentBlock } from './claude-code';
 import { AiError } from './errors';
 import { nextPacificMidnight } from './schedule';
 
-// Services that speak the OpenAI chat format with a JSON schema: Google's Gemini API (free key from
-// aistudio.google.com) and anything the person sets up under "Other (OpenAI-compatible)" (Groq,
-// OpenRouter, OpenAI, a local server). One request per run; the key goes only to that service.
+// Services that speak the OpenAI chat format: Google's Gemini API (free key from aistudio.google.com),
+// DeepSeek, and anything the person sets up under "Other (OpenAI-compatible)" (Groq, OpenRouter, OpenAI,
+// a local server). One request per run; the key goes only to that service.
 
 export const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/openai';
+export const DEEPSEEK_BASE = 'https://api.deepseek.com';
 
-export interface CompatTarget { kind: 'gemini' | 'openai'; baseUrl: string; key: string | null; model: string }
+export interface CompatTarget { kind: 'gemini' | 'deepseek' | 'openai'; baseUrl: string; key: string | null; model: string }
 
 const trimBase = (u: string): string => u.trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
 
-const name = (t: CompatTarget): string => t.kind === 'gemini' ? 'Gemini' : (() => { try { return new URL(t.baseUrl).host; } catch { return 'The AI service'; } })();
+const name = (t: CompatTarget): string => t.kind === 'gemini' ? 'Gemini' : t.kind === 'deepseek' ? 'DeepSeek' : (() => { try { return new URL(t.baseUrl).host; } catch { return 'The AI service'; } })();
 
 function headers(t: CompatTarget): Record<string, string> {
   return { 'Content-Type': 'application/json', ...(t.key ? { Authorization: 'Bearer ' + t.key } : {}) };
@@ -30,8 +31,11 @@ export function compatError(t: CompatTarget, status: number, body: unknown, retr
   const msg = errText(body);
   const who = name(t);
   if (status === 401 || status === 403 || /API[_ ]?key.*(not valid|invalid)|API_KEY_INVALID/i.test(msg)) {
-    return new AiError(t.kind === 'gemini' ? 'Google rejected that key. Make a new one at aistudio.google.com → Get API key.' : `${who} rejected that key.`, 'bad_key');
+    return new AiError(t.kind === 'gemini' ? 'Google rejected that key. Make a new one at aistudio.google.com → Get API key.'
+      : t.kind === 'deepseek' ? 'DeepSeek rejected that key. Check it at platform.deepseek.com → API keys.' : `${who} rejected that key.`, 'bad_key');
   }
+  // A prepaid balance at zero stays that way until someone tops up, so auto summary should wait, not retry.
+  if (status === 402) return new AiError(`Your ${who} balance is empty. Top it up, then run this again.`, 'rate_limited', now + 60 * 60_000);
   if (status === 404) return new AiError(`${who} has no model called ${t.model}. Check the model name in Settings.`, 'bad_key');
   if (status === 429) {
     const daily = /per ?day|PerDay|daily/i.test(msg);
@@ -42,11 +46,25 @@ export function compatError(t: CompatTarget, status: number, body: unknown, retr
   return new AiError(`${who} returned an error (${status})${msg ? ': ' + msg : ''}`, 'api');
 }
 
+const DEEPSEEK_EFFORT = { low: 'none', medium: 'low', high: 'high' } as const;
+
 /** The request body: system prompt, then the photos (each after its label) and the transcript. */
 export function compatBody(t: CompatTarget, system: string, content: ContentBlock[], schema: object, effort: 'low' | 'medium' | 'high'): object {
   const parts = content.map(b => b.type === 'text'
     ? { type: 'text', text: b.text }
     : { type: 'image_url', image_url: { url: `data:${b.source.media_type};base64,${b.source.data}` } });
+  if (t.kind === 'deepseek') {
+    // DeepSeek has JSON mode but no schema input, so the prompt carries the schema (it must also say "JSON").
+    return {
+      model: t.model,
+      messages: [{ role: 'system', content: `${system}\n\nReply with one JSON object and nothing else. It must match this JSON schema:\n${JSON.stringify(schema)}` }, { role: 'user', content: parts }],
+      response_format: { type: 'json_object' },
+      // Thinking is on by default and billed as output, so it follows the effort this run asks for.
+      reasoning_effort: DEEPSEEK_EFFORT[effort],
+      max_tokens: 16000,
+      temperature: 0.2,
+    };
+  }
   return {
     model: t.model,
     messages: [{ role: 'system', content: system }, { role: 'user', content: parts }],
@@ -99,5 +117,6 @@ export async function compatTest(t: CompatTarget): Promise<void> {
   const ids = (body?.data ?? []).map(m => m.id.replace(/^models\//, ''));
   // Google's "-latest" aliases point at whichever model is current and aren't in the list themselves.
   const alias = t.kind === 'gemini' && /-latest$/.test(t.model);
-  if (t.model && ids.length && !alias && !ids.includes(t.model)) throw new AiError(`The key works, but ${name(t)} has no model called ${t.model}. Check the model name.`, 'bad_key');
+  // DeepSeek still accepts older names it no longer lists, so its list can't rule a model out.
+  if (t.kind !== 'deepseek' && t.model && ids.length && !alias && !ids.includes(t.model)) throw new AiError(`The key works, but ${name(t)} has no model called ${t.model}. Check the model name.`, 'bad_key');
 }

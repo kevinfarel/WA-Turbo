@@ -115,9 +115,9 @@ export type ModelId = string;
 
 /**
  * How WA Turbo reaches an AI: the Claude Code login (the person's Claude plan), an Anthropic API key, the engine
- * person's own Ollama models (local), a Gemini key, any OpenAI-compatible service, or the Antigravity and Codex CLIs.
+ * person's own Ollama models (local), a Gemini or DeepSeek key, any OpenAI-compatible service, or the Antigravity and Codex CLIs.
  */
-export type AiProvider = 'claude-code' | 'api' | 'local' | 'gemini' | 'openai' | 'antigravity' | 'codex';
+export type AiProvider = 'claude-code' | 'api' | 'local' | 'gemini' | 'deepseek' | 'openai' | 'antigravity' | 'codex';
 
 /** What the Summarize button reads: this week (Monday 00:00 to now, newest 300 at most) or a fixed count. */
 export type SummaryWindow = 'week' | 50 | 100 | 300;
@@ -135,6 +135,7 @@ export interface Settings {
   /** Each other provider's model; empty means that provider's own default. */
   localModel: string;
   geminiModel: string;
+  deepseekModel: string;
   openaiModel: string;
   /** OpenAI-compatible: the service's base URL, e.g. https://api.groq.com/openai/v1. */
   openaiBaseUrl: string;
@@ -142,6 +143,8 @@ export interface Settings {
   codexModel: string;
   /** The person accepted that Google may use messages sent with a free Gemini key to improve its products. */
   geminiAgreed: boolean;
+  /** The person accepted that messages go to DeepSeek, in China, under its data terms. */
+  deepseekAgreed: boolean;
   /** Gemini and Antigravity: auto summary stops after this many runs a day (0 = no limit). */
   autoDailyBudget: number;
   window: SummaryWindow;
@@ -216,9 +219,9 @@ export interface AiStatus {
   provider: AiProvider;
   connected: boolean;
   testing: boolean;
-  /** CLI providers: whether the CLI was found. Local model: whether Ollama is running. */
+  /** CLI providers: whether the CLI was found. Local model: whether Ollama is running. DeepSeek: whether a key was found. */
   cliFound: boolean;
-  /** Who or what it runs as: "me@x.com · Pro", "Ollama 0.40.5". */
+  /** Who or what it runs as: "me@x.com · Pro", "Ollama 0.40.5", or the variable a DeepSeek key came from. */
   account: string | null;
   /** Local model: the models installed in Ollama. */
   models?: string[];

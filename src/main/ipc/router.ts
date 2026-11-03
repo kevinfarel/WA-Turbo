@@ -15,9 +15,10 @@ import { resetClient, testKey } from '../ai/client';
 import { claudeCodeStatus, forgetClaude } from '../ai/claude-code';
 import { agyStatus, checkAgy, findAgy, forgetAgy } from '../ai/antigravity';
 import { codexStatus, findCodex, forgetCodex } from '../ai/codex';
+import { DEEPSEEK_ENV, deepseekKey, forgetDeepseek } from '../ai/deepseek';
 import { diagText } from '../ai/diag';
 import { localModels } from '../ai/local';
-import { compatTest, GEMINI_BASE } from '../ai/openai-compat';
+import { compatTest, DEEPSEEK_BASE, GEMINI_BASE } from '../ai/openai-compat';
 import { summarizeChat } from '../ai/summarize';
 import { generateReport } from '../ai/report';
 import { autoSummary } from '../ai/auto';
@@ -98,6 +99,10 @@ export async function aiStatus(provider: AiProvider): Promise<AiStatus> {
     case 'gemini': {
       const s = await Q.getSettings();
       return { ...base, connected: !!getProviderKey('gemini') && s.geminiAgreed };
+    }
+    case 'deepseek': {
+      const [s, found] = await Promise.all([Q.getSettings(), deepseekKey()]);
+      return { ...base, connected: !!found && s.deepseekAgreed, cliFound: !!found, account: found?.from === 'env' ? DEEPSEEK_ENV : null };
     }
     case 'openai': {
       const s = await Q.getSettings();
@@ -397,7 +402,7 @@ export function registerIpc(d: RouterDeps): void {
     },
     autoStatus: async () => autoSummary.status(),
     checkAi: async deep => {
-      forgetClaude(); forgetAgy(); forgetCodex();
+      forgetClaude(); forgetAgy(); forgetCodex(); forgetDeepseek();
       const s = await Q.getSettings();
       if (deep && s.provider === 'antigravity' && (await findAgy())) {
         try { await checkAgy(s.agyModel); } catch (e) {
@@ -425,11 +430,18 @@ export function registerIpc(d: RouterDeps): void {
     testProviderKey: async (provider, key) => {
       try {
         const s = await Q.getSettings();
-        const k = key?.trim() || getProviderKey(provider);
+        const deepseek = provider === 'deepseek';
+        if (deepseek) forgetDeepseek();
+        const k = key?.trim() || (deepseek ? (await deepseekKey())?.key ?? null : getProviderKey(provider));
         if (provider === 'gemini' && !k) throw new Error('Paste your Gemini key first.');
+        if (deepseek && !k) throw new Error('Paste your DeepSeek key first.');
         if (provider === 'openai' && !s.openaiBaseUrl) throw new Error('Enter the service address first, e.g. https://api.groq.com/openai/v1.');
         if (provider === 'openai' && !s.openaiModel) throw new Error('Enter the model name first.');
-        await compatTest({ kind: provider, baseUrl: provider === 'gemini' ? GEMINI_BASE : s.openaiBaseUrl, key: k, model: provider === 'gemini' ? s.geminiModel || DEFAULT_MODELS.gemini : s.openaiModel });
+        await compatTest({
+          kind: provider, key: k,
+          baseUrl: provider === 'gemini' ? GEMINI_BASE : deepseek ? DEEPSEEK_BASE : s.openaiBaseUrl,
+          model: provider === 'gemini' ? s.geminiModel || DEFAULT_MODELS.gemini : deepseek ? s.deepseekModel || DEFAULT_MODELS.deepseek : s.openaiModel,
+        });
         if (key?.trim()) setProviderKey(provider, key.trim());
         langDetect.poke(true);
         await autoSummary.schedule();

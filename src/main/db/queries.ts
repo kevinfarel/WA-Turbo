@@ -659,7 +659,7 @@ export async function reviewLoop(id: string, p: { topic?: string | null; blocks?
 
 export const DEFAULT_SETTINGS: Settings = {
   provider: 'claude-code', model: 'claude-haiku-5-5', window: 'week', customPrompt: '', openAtLogin: false, aiImages: true,
-  localModel: '', geminiModel: '', openaiModel: '', openaiBaseUrl: '', agyModel: '', codexModel: '', geminiAgreed: false, autoDailyBudget: 100,
+  localModel: '', geminiModel: '', deepseekModel: '', openaiModel: '', openaiBaseUrl: '', agyModel: '', codexModel: '', geminiAgreed: false, deepseekAgreed: false, autoDailyBudget: 100,
   autoOn: true, pinEveryMin: 5, pinWindow: 10, otherEveryMin: 60, otherWindow: 2,
   notifyOn: true, notifyPinnedSound: 'Glass', notifyRemindMin: 10, notifyOthers: 'direct', notifyOtherSound: 'Tink', notifyPreview: true,
   notifyBadge: 'chats', notifyOverdue: true, menuBar: true, notifyPausedUntil: 0, contactsCountry: '', loopRules: {},
