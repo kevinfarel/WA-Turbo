@@ -7,6 +7,9 @@ export const IS_WIN = (globalThis as { platform?: string }).platform === 'win32'
 /** How the copy names the computer. */
 export const HERE = IS_WIN ? 'this PC' : 'this Mac';
 
+/** The console app the setup steps name (the main process words its messages the same way). */
+export const TERMINAL = IS_WIN ? 'Command Prompt' : 'Terminal';
+
 /** [macOS English, Windows English], applied in order to each text node; the catch-alls come last. */
 export const WIN_COPY: [string, string][] = [
   ['a Dock bounce until you look', 'a flashing taskbar button until you look'],
@@ -22,8 +25,15 @@ export const WIN_COPY: [string, string][] = [
   ['Same as macOS', 'Same as Windows'],
   ['macOS notifications are not available.', 'Notifications are not available on this PC.'],
   ['leaves the Mac', 'leaves the PC'],
+  // AI setup steps: Windows has no Homebrew, and Command Prompt runs npm's .cmd shims where PowerShell's
+  // default policy blocks its .ps1 ones.
+  ['brew install --cask claude-code', 'irm https://claude.ai/install.ps1 | iex'],
+  ['Install it with', 'Install it in PowerShell with'],
+  ['Install Codex:', 'Install Node.js from nodejs.org, then Codex in Command Prompt:'],
+  ['In Terminal (Command Prompt on Windows), run', 'In Command Prompt, run'],
   ['On this Mac', 'On this PC'],
   ['this Mac', 'this PC'],
+  ['Terminal', 'Command Prompt'],
 ];
 
 export const toWindows = (s: string): string => WIN_COPY.reduce((t, [mac, win]) => t.split(mac).join(win), s);
@@ -40,6 +50,9 @@ const WIN_ID: Record<string, string> = {
   'Send the file to this PC by email, iCloud Drive or USB.': 'Kirim file ke PC ini lewat email, iCloud Drive atau USB.',
   'Sound: Reminder': 'Suara: Pengingat', 'Sound: Message': 'Suara: Pesan', 'Sound: Mail': 'Suara: Email', 'Sound: Text': 'Suara: SMS',
   'Sound: Windows default': 'Suara: bawaan Windows',
+  'Install it in PowerShell with': 'Pasang lewat PowerShell dengan',
+  'Install Node.js from nodejs.org, then Codex in Command Prompt:': 'Pasang Node.js dari nodejs.org, lalu Codex di Command Prompt:',
+  'In Command Prompt, run': 'Di Command Prompt, jalankan',
   // Messages from the main process on Windows
   'WA Turbo can only send photos (JPEG, PNG).': 'WA Turbo hanya bisa mengirim foto (JPEG, PNG).',
   "WA Turbo's database files are missing. Reinstall WA Turbo.": 'File database WA Turbo tidak ada. Pasang ulang WA Turbo.',
@@ -55,7 +68,7 @@ const HERE_ID: Record<string, string> = {
   'Notifications are not available on this Mac.': 'Notifikasi tidak tersedia di Mac ini.',
 };
 
-const ID_SWAPS: [RegExp, string][] = [[/ikon Dock memantul/g, 'tombol taskbar berkedip'], [/Badge Dock/g, 'Badge taskbar'], [/\bmacOS\b/g, 'Windows'], [/\bMac\b/g, 'PC']];
+const ID_SWAPS: [RegExp, string][] = [[/ikon Dock memantul/g, 'tombol taskbar berkedip'], [/Badge Dock/g, 'Badge taskbar'], [/\bmacOS\b/g, 'Windows'], [/\bMac\b/g, 'PC'], [/\bTerminal\b/g, 'Command Prompt']];
 
 /** Entries to add to the Indonesian dictionary for this platform: each Mac sentence again in its Windows wording. */
 export function platformDictionary(dict: Record<string, string>): Record<string, string> {

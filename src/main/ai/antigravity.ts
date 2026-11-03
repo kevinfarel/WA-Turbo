@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { agyOk, setAgyOk } from '../config';
+import { agyOk, setAgyOk, TERMINAL } from '../config';
 import { cliEnv, cliFinder, lastLine, launcher, runCli } from './cli';
 import { recordDiag, runFolder, scrubArgs } from './diag';
 import { AiError } from './errors';
@@ -45,7 +45,7 @@ export function parseAgy(stdout: string): AgyResult | null {
 export function agyError(text: string): AiError {
   if (/authentication required|not signed in|sign ?in|log ?in/i.test(text)) {
     setAgyOk(false);
-    return new AiError('Antigravity is signed out. Open Terminal, run agy, sign in with Google, then press Check again in Settings.', 'no_key');
+    return new AiError(`Antigravity is signed out. Open ${TERMINAL}, run agy, sign in with Google, then press Check again in Settings.`, 'no_key');
   }
   if (/quota|exhausted|rate.?limit|429|spend cap/i.test(text)) return new AiError('Your Antigravity quota is used up for now. ' + text, 'rate_limited', Date.now() + 60 * 60_000);
   if (/unknown model|model .*not (found|available)/i.test(text)) return new AiError('Antigravity has no model by that name. Clear the model in Settings to use its default.', 'bad_key');

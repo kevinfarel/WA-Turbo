@@ -4,6 +4,13 @@ User-visible changes to WA Turbo. The format follows [Keep a Changelog](https://
 
 ## [Unreleased]
 
+Windows catches up with 0.4.0: the new AI connections, @ tags in groups and pasting photos all ship in the Windows installer, and their setup steps now read right on a PC.
+
+### Fixed
+- Windows: the AI setup steps and sign-in messages say **Command Prompt** instead of Terminal, in English and Bahasa Indonesia (Command Prompt runs the npm-installed `codex` and `claude` commands, which PowerShell blocks by default).
+- Windows: "Claude Code isn't installed" shows the Windows installer command (`irm https://claude.ai/install.ps1 | iex`, in PowerShell) instead of Homebrew.
+- Windows: the ChatGPT (Codex) steps drop the Homebrew option and say to install Node.js first for `npm install -g @openai/codex`.
+
 ## [0.4.0] - 2026-11-02
 
 ### Added

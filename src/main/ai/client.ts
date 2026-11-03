@@ -3,7 +3,7 @@ import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
 import { modelLabel, splitModel } from '@shared/ai';
 import type { AiProvider, ModelId, Settings } from '@shared/types';
-import { getApiKey, getProviderKey } from '../config';
+import { getApiKey, getProviderKey, TERMINAL } from '../config';
 import { getSettings, logRun } from '../db/queries';
 import { runAgy } from './antigravity';
 import { runClaudeCode, type ContentBlock } from './claude-code';
@@ -178,7 +178,7 @@ function cliSchema(schema: z.ZodType): object {
 
 function cliError(status: number | null, msg: string, model: ModelId): AiError {
   if (status === 401 || /\/login|not logged in|log ?in again|invalid api key|oauth/i.test(msg)) {
-    return new AiError('Claude Code is signed out. Open Terminal, run claude, type /login, then check again in Settings.', 'no_key');
+    return new AiError(`Claude Code is signed out. Open ${TERMINAL}, run claude, type /login, then check again in Settings.`, 'no_key');
   }
   if (status === 429 || /usage limit|limit reached|rate limit/i.test(msg)) return new AiError('Your Claude plan is at its usage limit. ' + msg, 'rate_limited');
   if (status === 404 || status === 403) return new AiError(`Your Claude plan can't use ${modelLabel(model)} in Claude Code. Pick another model in Settings.`, 'bad_key');
