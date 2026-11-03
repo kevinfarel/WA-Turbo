@@ -20,6 +20,7 @@ export const PROVIDERS: Record<AiProvider, ProviderInfo> = {
   api: { id: 'api', name: 'Anthropic API key', free: false, quota: false, experimental: false },
   local: { id: 'local', name: 'Local model', free: true, quota: false, experimental: false },
   gemini: { id: 'gemini', name: 'Gemini free key', free: true, quota: true, experimental: false },
+  deepseek: { id: 'deepseek', name: 'DeepSeek', free: false, quota: false, experimental: true },
   openai: { id: 'openai', name: 'OpenAI-compatible', free: false, quota: false, experimental: false },
   antigravity: { id: 'antigravity', name: 'Google (Antigravity)', free: true, quota: true, experimental: true },
   codex: { id: 'codex', name: 'ChatGPT (Codex)', free: false, quota: false, experimental: true },
@@ -50,14 +51,18 @@ export function pickLocal(models: string[]): string | null {
   return chat[0] ?? null;
 }
 
-export const DEFAULT_MODELS = { gemini: 'gemini-flash-latest', openai: '', antigravity: '', codex: '' } as const;
+export const DEFAULT_MODELS = { gemini: 'gemini-flash-latest', deepseek: 'deepseek-flash', openai: '', antigravity: '', codex: '' } as const;
+
+/** DeepSeek's Flash models take photos; its Pro model is text only. */
+export const deepseekSeesPhotos = (model: string): boolean => /flash/i.test(model);
 
 /** The model this provider runs, as the id stored with summaries, reports and usage. */
-export function activeModel(s: Pick<Settings, 'provider' | 'model' | 'localModel' | 'geminiModel' | 'openaiModel' | 'agyModel' | 'codexModel'>): ModelId {
+export function activeModel(s: Pick<Settings, 'provider' | 'model' | 'localModel' | 'geminiModel' | 'deepseekModel' | 'openaiModel' | 'agyModel' | 'codexModel'>): ModelId {
   switch (s.provider) {
     case 'claude-code': case 'api': return s.model;
     case 'local': return 'local:' + s.localModel;
     case 'gemini': return 'gemini:' + (s.geminiModel || DEFAULT_MODELS.gemini);
+    case 'deepseek': return 'deepseek:' + (s.deepseekModel || DEFAULT_MODELS.deepseek);
     case 'openai': return 'openai:' + s.openaiModel;
     case 'antigravity': return 'antigravity:' + s.agyModel;
     case 'codex': return 'codex:' + s.codexModel;
@@ -65,7 +70,8 @@ export function activeModel(s: Pick<Settings, 'provider' | 'model' | 'localModel
 }
 
 /** The cheapest model of the selected provider, for one-off calls such as language detection. */
-export const cheapModel = (s: Parameters<typeof activeModel>[0]): ModelId => isClaude(s.provider) ? 'claude-haiku-5-5' : activeModel(s);
+export const cheapModel = (s: Parameters<typeof activeModel>[0]): ModelId =>
+  isClaude(s.provider) ? 'claude-haiku-5-5' : s.provider === 'deepseek' ? 'deepseek:' + DEFAULT_MODELS.deepseek : activeModel(s);
 
 /** Splits "gemini:gemini-flash-latest" into provider and model name; Claude ids have no prefix. */
 export function splitModel(id: ModelId): { provider: AiProvider | null; name: string } {

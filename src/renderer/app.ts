@@ -1562,6 +1562,7 @@ function renderAutoState(): void {
     : p === 'local' ? `Runs on this computer, one chat at a time, pinned first, at most ${FREE_CAP} chats every 10 minutes so it doesn't hold up your other work.`
     : PROVIDERS[p].quota ? `Runs on the free plan, one chat at a time, pinned first: at most ${FREE_CAP} chats every 10 minutes and no more than the daily budget above. Pauses until the quota resets if Google says it's used up.`
     : p === 'codex' ? 'Runs on your ChatGPT plan, one chat at a time, pinned first. Pauses for 30 minutes if the plan reaches its Codex limit.'
+    : p === 'deepseek' ? 'Spends your DeepSeek balance, one chat at a time, pinned first. Pauses for an hour if the balance runs out.'
     : 'Runs on the service you entered, one chat at a time, pinned first. Pauses if it reports a usage limit.') + skip;
 }
 
@@ -2121,9 +2122,10 @@ document.addEventListener('click', e => {
       return;
     case 'testGemini': void testProvider('gemini'); return;
     case 'testOpenai': void testProvider('openai'); return;
-    case 'disconnectGemini': case 'disconnectOpenai': {
-      const k = btn!.id === 'disconnectGemini' ? 'gemini' : 'openai';
-      void api.disconnectProvider(k).then(() => checkAi(false)).then(() => toast(k === 'gemini' ? 'Gemini key removed' : 'Key forgotten'));
+    case 'testDeepseek': void testProvider('deepseek'); return;
+    case 'disconnectGemini': case 'disconnectOpenai': case 'disconnectDeepseek': {
+      const k = btn!.id === 'disconnectGemini' ? 'gemini' : btn!.id === 'disconnectDeepseek' ? 'deepseek' : 'openai';
+      void api.disconnectProvider(k).then(() => checkAi(false)).then(() => toast(k === 'gemini' ? 'Gemini key removed' : k === 'deepseek' ? 'DeepSeek key removed' : 'Key forgotten'));
       return;
     }
     case 'testNotify': void api.testNotification().then(() => toast('Test sent. Two banners: pinned, then other.', 'ok')).catch(fail); return;
@@ -2292,13 +2294,14 @@ function notConnected(ai: AiStatus): string {
     case 'codex': return ai.cliFound ? 'Codex is not signed in' : 'Codex CLI not found';
     case 'antigravity': return ai.cliFound ? (ai.detail ?? 'Antigravity is not signed in') : 'Antigravity CLI not found';
     case 'local': return ai.cliFound ? 'Ollama has no model installed yet' : 'Ollama is not running on ' + HERE;
+    case 'deepseek': return ai.cliFound ? 'Accept the DeepSeek notice in Settings' : 'No DeepSeek key found';
     default: return 'Not connected';
   }
 }
 
 /* --- AI connection boxes (Settings) --- */
 const BOXES: Record<AiProvider, string> = {
-  'claude-code': '#ccBox', api: '#keyBox', local: '#localBox', gemini: '#geminiBox', openai: '#openaiBox', antigravity: '#agyBox', codex: '#codexBox',
+  'claude-code': '#ccBox', api: '#keyBox', local: '#localBox', gemini: '#geminiBox', deepseek: '#deepseekBox', openai: '#openaiBox', antigravity: '#agyBox', codex: '#codexBox',
 };
 
 /** Fills a text field from settings unless the person is typing in it. */
@@ -2336,6 +2339,19 @@ function renderProviderBox(): void {
     $('#disconnectGemini').hidden = !on;
     const b = $<HTMLButtonElement>('#testGemini');
     b.disabled = ai.testing || !s.geminiAgreed;
+    b.textContent = ai.testing ? 'Testing…' : on ? 'Re-test connection' : 'Test connection';
+  }
+  if (p === 'deepseek') {
+    const env = mine && ai.account;
+    $<HTMLInputElement>('#deepseekAgreed').checked = s.deepseekAgreed;
+    fill('deepseekModel', s.deepseekModel);
+    $('#deepseekFound').hidden = !env;
+    $('#deepseekGuide').hidden = !!env;
+    $('#deepseekState').textContent = checking ?? (on ? (env ? 'Connected · ' + env : 'Connected') : mine && ai.cliFound ? 'Key found' : 'Not connected');
+    // A key from the environment isn't WA Turbo's to remove.
+    $('#disconnectDeepseek').hidden = !on || !!env;
+    const b = $<HTMLButtonElement>('#testDeepseek');
+    b.disabled = ai.testing || !s.deepseekAgreed;
     b.textContent = ai.testing ? 'Testing…' : on ? 'Re-test connection' : 'Test connection';
   }
   if (p === 'openai') {
@@ -2378,13 +2394,15 @@ function renderLocalFound(): void {
     : f.running ? 'Ollama found, no model yet' : 'Not found on ' + HERE;
 }
 
-async function testProvider(kind: 'gemini' | 'openai'): Promise<void> {
-  const input = $<HTMLInputElement>(kind === 'gemini' ? '#geminiKey' : '#openaiKey');
-  const errId = kind === 'gemini' ? 'geminiErr' : 'openaiErr';
+async function testProvider(kind: 'gemini' | 'deepseek' | 'openai'): Promise<void> {
+  const input = $<HTMLInputElement>(`#${kind}Key`);
+  const errId = `${kind}Err`;
   showErr(errId, null);
   if (kind === 'gemini' && !state.settings.geminiAgreed) { showErr(errId, 'Tick the box above first: it says Google may use what you send.'); return; }
+  if (kind === 'deepseek' && !state.settings.deepseekAgreed) { showErr(errId, 'Tick the box above first: it says where these messages go.'); return; }
   const patch: Partial<Settings> = kind === 'gemini'
     ? { geminiModel: $<HTMLInputElement>('#geminiModel').value.trim() }
+    : kind === 'deepseek' ? { deepseekModel: $<HTMLInputElement>('#deepseekModel').value.trim() }
     : { openaiBaseUrl: $<HTMLInputElement>('#openaiBaseUrl').value.trim(), openaiModel: $<HTMLInputElement>('#openaiModel').value.trim() };
   state.settings = await api.saveSettings(patch);
   state.ai.testing = true; renderSettings();
@@ -2480,8 +2498,8 @@ document.addEventListener('change', e => {
     state.ai = { ...state.ai, provider: t.value as AiProvider, connected: false, testing: true };
     void api.saveSettings({ provider: t.value as AiProvider }).then(s => { state.settings = s; return checkAi(false); });
   }
-  if (t.id === 'geminiAgreed') void api.saveSettings({ geminiAgreed: t.checked }).then(s => { state.settings = s; return checkAi(false); });
-  if (['geminiModel', 'openaiModel', 'openaiBaseUrl', 'agyModel', 'codexModel'].includes(t.id)) {
+  if (t.id === 'geminiAgreed' || t.id === 'deepseekAgreed') void api.saveSettings({ [t.id]: t.checked } as Partial<Settings>).then(s => { state.settings = s; return checkAi(false); });
+  if (['geminiModel', 'deepseekModel', 'openaiModel', 'openaiBaseUrl', 'agyModel', 'codexModel'].includes(t.id)) {
     void api.saveSettings({ [t.id]: t.value.trim() } as Partial<Settings>).then(s => { state.settings = s; return t.id.startsWith('openai') ? checkAi(false) : renderSettings(); });
   }
   if (t.id === 'autoDailyBudget') void api.saveSettings({ autoDailyBudget: Number(t.value) }).then(s => { state.settings = s; renderAutoState(); });

@@ -76,8 +76,8 @@ export interface Api {
   testKey(key: string): Promise<{ ok: boolean; error: string | null }>;
   disconnectKey(): Promise<void>;
   /** Gemini or OpenAI-compatible: checks the key (null = the saved one) with the model and address in Settings, then saves it. */
-  testProviderKey(provider: 'gemini' | 'openai', key: string | null): Promise<{ ok: boolean; error: string | null }>;
-  disconnectProvider(provider: 'gemini' | 'openai'): Promise<void>;
+  testProviderKey(provider: 'gemini' | 'deepseek' | 'openai', key: string | null): Promise<{ ok: boolean; error: string | null }>;
+  disconnectProvider(provider: 'gemini' | 'deepseek' | 'openai'): Promise<void>;
   /** Looks for Ollama on this computer and the models installed there (for the Local model card). */
   detectLocal(): Promise<LocalFound>;
   /** Experimental providers: what their last run did, without any message text. */

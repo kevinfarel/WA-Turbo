@@ -247,6 +247,10 @@
               <span><b>Anthropic API key</b><span class="kv">Billed separately, per token.</span></span>
             </label>
             <label class="prov-opt">
+              <input type="radio" name="provider" value="deepseek">
+              <span><b>DeepSeek <span class="beta">Experimental</span></b><span class="kv">Prepaid API key. Finds DEEPSEEK_API_KEY on this computer.</span></span>
+            </label>
+            <label class="prov-opt">
               <input type="radio" name="provider" value="openai">
               <span><b>Other (OpenAI-compatible)</b><span class="kv">Groq, OpenRouter, OpenAI or any compatible address.</span></span>
             </label>
@@ -353,6 +357,47 @@
               <button type="button" class="btn" id="disconnectGemini" hidden>Disconnect</button>
               <span class="od-fill"></span>
               <span class="kv" id="geminiState">Not connected</span>
+            </div>
+          </div>
+
+          <div class="prov-box" id="deepseekBox" hidden>
+            <p class="hint">DeepSeek has no subscription or account login to connect: it sells API access from a prepaid balance, so WA Turbo uses your API key. If DEEPSEEK_API_KEY is already set on this computer, WA Turbo finds it by itself. Otherwise paste a key below. Flash can see photos; Pro reads text only.</p>
+            <p class="hint" id="deepseekFound" hidden>Found DEEPSEEK_API_KEY on this computer, so there is nothing to paste.</p>
+            <div class="guide" id="deepseekGuide">
+              <b>Get a key</b>
+              <ol class="howto">
+                <li>Press <b>Open DeepSeek Platform</b> below. It opens platform.deepseek.com/api_keys in your browser.</li>
+                <li>Sign in, then add some balance on the <b>Top up</b> page. Requests fail while the balance is empty.</li>
+                <li>Press <b>Create new API key</b> and copy it. It starts with <code>sk-</code>.</li>
+                <li>Come back here, tick the box under the warning, paste the key and press <b>Test connection</b>.</li>
+              </ol>
+              <div class="od-row" style="--od-gap:8px">
+                <a class="btn" href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener">Open DeepSeek Platform</a>
+                <span class="kv">Keep the key private. You can delete it on the platform any time.</span>
+              </div>
+            </div>
+            <div class="banner warn">
+              <svg class="od-icon" style="--od-icon-size:16px;margin-top:1px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0"/></svg>
+              <span><b>These messages go to China.</b> DeepSeek is a Chinese company. Its privacy policy says it stores data in the People's Republic of China and may use it to train its models, and its API terms don't promise otherwise. Use "Local model" to keep chats private.</span>
+            </div>
+            <label class="ck-row"><input type="checkbox" id="deepseekAgreed"> <span>I understand, and I'm allowed to send these chats to DeepSeek</span></label>
+            <div class="inline-row">
+              <label class="f">
+                <span class="lb">DeepSeek API key</span>
+                <input type="password" id="deepseekKey" class="mono" placeholder="sk-..." autocomplete="off" spellcheck="false" aria-describedby="deepseekErr">
+              </label>
+            </div>
+            <label class="f">
+              <span class="lb">Model</span>
+              <input type="text" id="deepseekModel" class="mono" placeholder="deepseek-flash" autocomplete="off" spellcheck="false">
+              <span class="hp">Leave empty for Flash, DeepSeek's cheaper model. Pro is deepseek-v4-pro.</span>
+            </label>
+            <p class="err" id="deepseekErr" hidden></p>
+            <div class="od-row" style="--od-gap:8px">
+              <button type="button" class="btn btn-primary" id="testDeepseek">Test connection</button>
+              <button type="button" class="btn" id="disconnectDeepseek" hidden>Disconnect</button>
+              <span class="od-fill"></span>
+              <span class="kv" id="deepseekState">Not connected</span>
             </div>
           </div>
 
@@ -610,7 +655,7 @@
             <details>
               <summary>Where do my messages go?</summary>
               <div class="fa">
-                <p>Chats stay on this Mac, in the database built into WA Turbo. Only what you select for a summary or report is sent, and only to the AI you picked in Settings: Anthropic (Claude Code or an API key), Google (a Gemini key or Antigravity), OpenAI (Codex) or the service you entered. With "Local model" nothing leaves the Mac at all. There is no WA Turbo server in between. Phone numbers in the text are swapped for stable aliases before the request leaves the Mac. Photos are sent as they are, so a number or name inside a photo is not hidden. Generated reports are written locally and are not synced anywhere.</p>
+                <p>Chats stay on this Mac, in the database built into WA Turbo. Only what you select for a summary or report is sent, and only to the AI you picked in Settings: Anthropic (Claude Code or an API key), Google (a Gemini key or Antigravity), OpenAI (Codex), DeepSeek or the service you entered. With "Local model" nothing leaves the Mac at all. There is no WA Turbo server in between. Phone numbers in the text are swapped for stable aliases before the request leaves the Mac. Photos are sent as they are, so a number or name inside a photo is not hidden. Generated reports are written locally and are not synced anywhere.</p>
               </div>
             </details>
             <details>

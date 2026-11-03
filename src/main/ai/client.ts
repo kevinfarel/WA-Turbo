@@ -1,16 +1,17 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
-import { modelLabel, splitModel } from '@shared/ai';
+import { deepseekSeesPhotos, modelLabel, splitModel } from '@shared/ai';
 import type { AiProvider, ModelId, Settings } from '@shared/types';
 import { getApiKey, getProviderKey, TERMINAL } from '../config';
 import { getSettings, logRun } from '../db/queries';
 import { runAgy } from './antigravity';
 import { runClaudeCode, type ContentBlock } from './claude-code';
 import { runCodex } from './codex';
+import { deepseekKey } from './deepseek';
 import { AiError } from './errors';
 import { localModels } from './local';
-import { compatChat, GEMINI_BASE } from './openai-compat';
+import { compatChat, DEEPSEEK_BASE, GEMINI_BASE } from './openai-compat';
 
 export { AiError };
 
@@ -88,12 +89,19 @@ export async function structured<S extends z.ZodType>(c: StructuredCall<S>): Pro
 interface OtherOut { output: unknown; input: number; outTokens: number; cacheRead: number; stop: string | null }
 
 const PROVIDER_NAME: Record<Exclude<AiProvider, 'claude-code' | 'api'>, string> = {
-  local: 'The local model', gemini: 'Gemini', openai: 'The AI service', antigravity: 'Antigravity', codex: 'Codex',
+  local: 'The local model', gemini: 'Gemini', deepseek: 'DeepSeek', openai: 'The AI service', antigravity: 'Antigravity', codex: 'Codex',
 };
 
 /** Photo labels written into the text, for providers that take the photos as a separate list. */
 function photoNote(images: AiImage[]): string {
   return images.length ? 'Photos attached, in this order: ' + images.map(i => i.label.replace(/^Photo /, '')).join(', ') + '\n\n' : '';
+}
+
+/** An OpenAI-format answer: an unreadable or blank one parses to undefined and fails validation. */
+function fromCompat(r: Awaited<ReturnType<typeof compatChat>>): OtherOut {
+  let output: unknown;
+  try { output = JSON.parse(r.text); } catch { output = undefined; }
+  return { output, input: r.input, outTokens: r.output, cacheRead: r.cacheRead, stop: r.stop };
 }
 
 async function runOther(c: StructuredCall<z.ZodType>, s: Settings, jsonSchema: object): Promise<OtherOut> {
@@ -110,10 +118,14 @@ async function runOther(c: StructuredCall<z.ZodType>, s: Settings, jsonSchema: o
       const gemini = s.provider === 'gemini';
       const key = getProviderKey(s.provider);
       if (gemini && !key) throw new AiError('Gemini is not connected. Add your free key in Settings → AI connection.', 'no_key');
-      const r = await compatChat({ kind: s.provider, baseUrl: gemini ? GEMINI_BASE : s.openaiBaseUrl, key, model }, c.system, contentOf(c), jsonSchema, c.effort, c.signal);
-      let output: unknown;
-      try { output = JSON.parse(r.text); } catch { output = undefined; }
-      return { output, input: r.input, outTokens: r.output, cacheRead: r.cacheRead, stop: r.stop };
+      return fromCompat(await compatChat({ kind: s.provider, baseUrl: gemini ? GEMINI_BASE : s.openaiBaseUrl, key, model }, c.system, contentOf(c), jsonSchema, c.effort, c.signal));
+    }
+    case 'deepseek': {
+      const found = await deepseekKey();
+      // A key found on the computer must not send chats before the person accepted the notice.
+      if (!found || !s.deepseekAgreed) throw new AiError('DeepSeek is not connected. Add your key and accept the notice in Settings → AI connection.', 'no_key');
+      const content = contentOf(deepseekSeesPhotos(model) ? c : { user: c.user });
+      return fromCompat(await compatChat({ kind: 'deepseek', baseUrl: DEEPSEEK_BASE, key: found.key, model }, c.system, content, jsonSchema, c.effort, c.signal));
     }
     case 'antigravity':
       return runAgy({ model, system: c.system, text: c.user, jsonSchema, effort: c.effort, signal: c.signal });
@@ -127,8 +139,8 @@ async function runOther(c: StructuredCall<z.ZodType>, s: Settings, jsonSchema: o
 async function viaOther<S extends z.ZodType>(c: StructuredCall<S>, s: Settings): Promise<z.infer<S>> {
   const who = PROVIDER_NAME[s.provider as keyof typeof PROVIDER_NAME] ?? 'The AI';
   const jsonSchema = cliSchema(c.schema);
-  // Small local models now and then miss a field; one more try usually fixes it.
-  const tries = s.provider === 'local' ? 2 : 1;
+  // Small local models now and then miss a field; DeepSeek's docs say its JSON mode can answer blank. One more try usually fixes it.
+  const tries = s.provider === 'local' || s.provider === 'deepseek' ? 2 : 1;
   for (let i = 1; ; i++) {
     const started = Date.now();
     try {
