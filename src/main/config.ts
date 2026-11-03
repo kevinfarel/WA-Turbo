@@ -25,6 +25,9 @@ interface ConfigFile {
 /** How the app names the computer in its copy. */
 export const HERE = process.platform === 'win32' ? 'this PC' : 'this Mac';
 
+/** The console app the sign-in steps name. Command Prompt on Windows, where PowerShell blocks npm's script shims by default. */
+export const TERMINAL = process.platform === 'win32' ? 'Command Prompt' : 'Terminal';
+
 export const dataDir = (): string => app.getPath('userData');
 export const mediaDir = (): string => join(dataDir(), 'media');
 const configPath = (): string => join(dataDir(), 'config.json');

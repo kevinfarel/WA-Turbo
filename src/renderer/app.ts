@@ -13,7 +13,7 @@ import { activeModel, FREE_CAP, isClaude, modelLabel, PROVIDERS } from '@shared/
 import { esc, fmtText } from './format';
 import { weekStart } from '@shared/week';
 import { WIN_SOUND_LABEL, WIN_SOUNDS, winSound } from '@shared/sounds';
-import { HERE, IS_WIN, toWindows } from './platform';
+import { HERE, IS_WIN, TERMINAL, toWindows } from './platform';
 import { lang, locale, setLang, startTranslating, tr } from './i18n';
 import { applyTheme, isDark, onThemeChange, setMode, setTheme, THEMES, themeColours, themeFor, themeMode, toggleDark } from './theme';
 
@@ -2291,7 +2291,7 @@ function renderProviderBox(): void {
     fill('codexModel', s.codexModel);
     $('#codexState').textContent = checking ?? (on ? 'Signed in' + (ai.account ? ' · ' + ai.account : '') : mine && ai.cliFound ? 'Not signed in' : 'Not installed');
     $<HTMLButtonElement>('#checkCodex').disabled = ai.testing;
-    showErr('codexErr', mine && !ai.testing && ai.cliFound && !ai.connected ? 'Run codex login in Terminal, then press Check again.' : null);
+    showErr('codexErr', mine && !ai.testing && ai.cliFound && !ai.connected ? 'Run codex login in ' + TERMINAL + ', then press Check again.' : null);
   }
 }
 
@@ -2611,6 +2611,12 @@ function windowsShell(): void {
     $<HTMLSelectElement>('#' + id).innerHTML = WIN_SOUNDS.map(s => '<option value="' + s + '">' + WIN_SOUND_LABEL[s] + '</option>').join('');
   }
   $('#dbTools').closest('label')!.hidden = true;
+  // Codex has no Homebrew install here: "npm … or brew …" becomes just the npm line.
+  for (const c of document.querySelectorAll('code')) {
+    if (c.textContent !== 'brew install codex') continue;
+    if (c.previousSibling?.nodeType === Node.TEXT_NODE) c.previousSibling.remove();
+    c.remove();
+  }
 }
 
 (function init() {
