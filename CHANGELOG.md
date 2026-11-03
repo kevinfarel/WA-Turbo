@@ -4,6 +4,9 @@ User-visible changes to WA Turbo. The format follows [Keep a Changelog](https://
 
 ## [Unreleased]
 
+### Added
+- Settings → SUM UP! rules: see the words the local rules look for, in eight lists (asks to you, your asks, promises, chases, short replies to skip, thanks, short OKs, and replies that aren't an answer yet). Click a word to switch it off, add your own, or reset to defaults. Out of the box the rules work exactly as before.
+
 ## [0.4.1] - 2026-11-03
 
 Windows catches up with 0.4.0: the new AI connections, @ tags in groups and pasting photos all ship in the Windows installer, and their setup steps now read right on a PC.

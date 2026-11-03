@@ -181,6 +181,21 @@ html,body,.app,.shell,.inbox,.convo{overflow:clip}
 .team-list li > span{display:grid;min-width:0}
 .team-list li b{font-weight:600;font-size:13px}
 .team-list .empty-line{color:var(--ink-4);font-size:12.5px;border-style:dashed}
+/* SUM UP! rules */
+.rule-groups{display:grid;gap:6px}
+.rule-grp{border:1px solid var(--line-soft);border-radius:var(--r-sm);background:var(--s0)}
+.rule-grp summary{padding:8px 10px;font-size:13px;cursor:pointer}
+.rule-grp summary b{font-weight:600}
+.rule-grp summary .kv{margin-left:6px}
+.rule-body{display:grid;gap:10px;padding:2px 10px 10px}
+.rule-body .hint{font-size:12.5px;color:var(--ink-3)}
+.rule-chips{display:flex;flex-wrap:wrap;gap:5px}
+.rule-chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:2px 8px;font:inherit;font-size:12px;text-align:left;overflow-wrap:anywhere;color:var(--ink-2);background:var(--s1);border:1px solid var(--line-soft);border-radius:999px;cursor:pointer}
+.rule-chip:hover{border-color:var(--ink-4)}
+.rule-chip[aria-pressed=false]{color:var(--ink-4);background:none;border-style:dashed;text-decoration:line-through}
+.rule-chip.added{color:var(--ok-text);background:var(--ok-soft);border-color:var(--ok-line)}
+.rule-add{display:flex;gap:6px}
+.rule-add input{flex:1 1 auto;min-width:0}
 /* Chat header: the chat name keeps room; the "Summed up" label gives way first */
 .convo-head > .od-field{min-width:150px;flex:1 1 150px}
 .convo-head > .sumup-at{flex:0 100 auto}

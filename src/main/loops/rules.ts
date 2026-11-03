@@ -1,5 +1,6 @@
-import type { LoopDir, LoopKind } from '@shared/types';
+import type { LoopDir, LoopKind, LoopRules, RuleGroupId } from '@shared/types';
 import { DEFAULT_SLA_H } from '@shared/sla';
+import { RULE_GROUPS } from '@shared/rule-terms';
 
 // Local loop rules. They run on this Mac for every new message and send nothing anywhere.
 // Matching is plain pattern work in English and Bahasa Indonesia; Claude reviews the hits
@@ -23,17 +24,48 @@ export type RuleResult =
 
 // Forms of address that trail short replies ("Baik ka", "Siap pak").
 const ADDRESS = '(?:\\s+(?:ka+k?|kk|pak|bu|bapak|ibu|mas|mba+k?|bro|sis|gan|min|om|bos+|sir|all|guys|team|tim))*';
-const SKIP = new RegExp('^(ok(e|ay|ey)?|oke+|okk+|noted|note|thanks?( you)?|thank you|thx|tq|tks|makasih|terima ?kasih|siap|sip|baik|done|mantap|👍|🙏|🙏🏻|👌)' + ADDRESS + '[\\s.!,🙏👍🏻🏼🏽]*$', 'iu');
-// Thanks or "received" settle what came before; "ok"/"baik" may only acknowledge the last message.
-const STRONG_ACK = /\b(terima ?kasih|makasih|ma+ka+sih|thanks?|thank you|thx|tq|tks|ty|noted|well received|received|got it|sudah (di ?)?terima|sudah masuk|sudah diterima|diterima|perfect|sounds good|all good)\b/i;
-const WEAK_ACK = /\b(ok(e|ay|ey)?|oke+|baik|siap|sip|mantap|done|beres|aman|alright|great)\b/i;
+const SKIP_TAIL = ADDRESS + '[\\s.!,🙏👍🏻🏼🏽]*$';
 const EMOJI_ACK = /^[\s🙏👍👌✅❤️🙌🏻🏼🏽🏾🏿️]+$/u;
-const DEFER = /\b(cek dulu|check (first|later)|nanti (saya|kami|aku)|akan (saya|kami)|saya akan|kami akan|i'?ll (check|get back|revert|update)|let me check|will (check|revert|get back)|tunggu|sebentar|bentar|on it)\b/i;
-const FOLLOW_UP = /\b(following up|follow(ing)?[\s-]?up|any update|any luck|still waiting|gentle reminder|just checking|bumping (this|up)|ada update|sudah ada update|kabar(nya)?|gimana (update|kabar)(nya)?|bagaimana (update|kabar)(nya)?)\b/i;
-const INBOUND_ASK = /\b(can you|could you|would you|will you|do you|are you|is there|please (confirm|check|send|advise|share|let|review|reply)|pls|kindly|mohon|tolong|apakah|kapan|bagaimana|gimana|bisa(kah)?|minta|boleh)\b/i;
-const OUTBOUND_ASK = /\b(please confirm|pls confirm|can you confirm|could you confirm|kindly confirm|confirm once|let (me|us) know|eta\b|mohon konfirmasi|mohon dikonfirmasi|tolong (di)?konfirmasi|bisa dikonfirmasi|mohon info|mohon dibantu)\b/i;
-const PROMISE = /\b(i will|i'll|we will|we'll|will send|will check|will share|will update|will revert|akan saya|saya akan|kami akan|nanti saya|segera saya)\b/i;
 const CONFIRM = /confirm|konfirmasi/i;
+
+type Matchers = Record<RuleGroupId, (text: string) => boolean>;
+
+/** The built-in pattern of each group, without the terms switched off; null when none are left. */
+export function builtInRegexes(cfg: LoopRules = {}): Record<RuleGroupId, RegExp | null> {
+  const out = {} as Record<RuleGroupId, RegExp | null>;
+  for (const g of RULE_GROUPS) {
+    const off = cfg[g.id]?.off ?? [];
+    const alt = g.terms.filter(t => !off.includes(t.label)).map(t => t.re).join('|');
+    // A short reply is the whole message; everything else may appear anywhere in it.
+    out[g.id] = !alt ? null : g.id === 'ignore' ? new RegExp('^(' + alt + ')' + SKIP_TAIL, 'iu') : new RegExp('\\b(' + alt + ')\\b', 'i');
+  }
+  return out;
+}
+
+// Added terms are plain text, so they are escaped and any spacing between words matches. Whole words
+// here too, with a boundary that works for emoji and accented letters, where \b does not.
+const literal = (term: string): string => term.split(' ').map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
+
+function addedRegex(id: RuleGroupId, add: string[]): RegExp | null {
+  if (!add.length) return null;
+  const alt = add.map(literal).join('|');
+  return new RegExp(id === 'ignore' ? '^(?:' + alt + ')' + SKIP_TAIL : '(?<![\\p{L}\\p{N}_])(?:' + alt + ')(?![\\p{L}\\p{N}_])', 'iu');
+}
+
+function compile(cfg: LoopRules): Matchers {
+  const built = builtInRegexes(cfg);
+  const out = {} as Matchers;
+  for (const g of RULE_GROUPS) {
+    const res = [built[g.id], addedRegex(g.id, cfg[g.id]?.add ?? [])].filter((r): r is RegExp => r !== null);
+    out[g.id] = text => res.some(r => r.test(text));
+  }
+  return out;
+}
+
+let m = compile({});
+
+/** Settings → SUM UP! rules: applies from the next message, and from startup after a restart. */
+export const setLoopRules = (cfg: LoopRules): void => { m = compile(cfg); };
 
 export const MIN_TEXT = 4;
 
@@ -43,15 +75,15 @@ export function topicOf(text: string): string {
 }
 
 function isQuestion(text: string): boolean {
-  return text.includes('?') || INBOUND_ASK.test(text);
+  return text.includes('?') || m.ask(text);
 }
 
 /** 2: "Terima kasih banyak atas pembayarannya ka 🙏", "noted, thanks". 1: "ok", "Baik ka", 👍. 0: not an acknowledgement. */
 export function ackStrength(text: string): 0 | 1 | 2 {
   const t = text.trim();
   if (!t || isQuestion(t) || t.length > 200) return 0;
-  if (STRONG_ACK.test(t)) return 2;
-  return EMOJI_ACK.test(t) || WEAK_ACK.test(t) ? 1 : 0;
+  if (m.thanks(t)) return 2;
+  return EMOJI_ACK.test(t) || m.okay(t) ? 1 : 0;
 }
 
 export const isAck = (text: string): boolean => ackStrength(text) > 0;
@@ -65,7 +97,7 @@ export function related(topic: string, reply: { text: string; type: string }): b
 }
 
 /** "Nanti saya cek dulu": a reply that postpones the answer instead of giving it. */
-export const isDeferral = (text: string): boolean => DEFER.test(text);
+export const isDeferral = (text: string): boolean => m.defer(text);
 
 const words = (s: string): Set<string> => new Set(s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(w => w.length > 1));
 
@@ -80,10 +112,10 @@ export function sameAsk(a: string, b: string): boolean {
 
 export function evaluate(input: RuleInput, openLoops: OpenLoopRef[]): RuleResult {
   const text = input.text.trim();
-  if (text.length < MIN_TEXT || SKIP.test(text)) return null;
+  if (text.length < MIN_TEXT || m.ignore(text)) return null;
 
   // A follow-up from the side that is waiting is a nudge on the loop, not a new loop.
-  if (FOLLOW_UP.test(text)) {
+  if (m.followUp(text)) {
     const want: LoopDir = input.fromMe ? 'waiting' : 'owed';
     const target = openLoops.find(l => l.dir === want);
     if (target) return { type: 'nudge', loopId: target.id, by: input.fromMe ? 'me' : 'them' };
@@ -104,10 +136,10 @@ export function evaluate(input: RuleInput, openLoops: OpenLoopRef[]): RuleResult
     return { type: 'create', dir: 'owed', kind: CONFIRM.test(text) ? 'confirmation' : 'question', topic: topicOf(text), slaH: DEFAULT_SLA_H.owed };
   }
 
-  if (OUTBOUND_ASK.test(text) || text.includes('?')) {
+  if (m.myAsk(text) || text.includes('?')) {
     return { type: 'create', dir: 'waiting', kind: CONFIRM.test(text) ? 'confirmation' : 'question', topic: topicOf(text), slaH: DEFAULT_SLA_H.waiting };
   }
-  if (PROMISE.test(text)) {
+  if (m.promise(text)) {
     return { type: 'create', dir: 'owed', kind: 'commitment', topic: topicOf(text), slaH: DEFAULT_SLA_H.owed };
   }
   return null;

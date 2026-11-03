@@ -7,6 +7,7 @@ import { connect, disconnect, migrate } from './db/client';
 import { pgServer, PgServerError } from './db/server';
 import { chatMeta, chatsWithOpenLoops, getSettings, lastSummary, listAccounts, listLoops, listPartners, messageMedia, saveSettings } from './db/queries';
 import { resolveLoops } from './loops/service';
+import { setLoopRules } from './loops/rules';
 import { initMedia, loadMedia, MediaError } from './media';
 import { aiStatus, broadcast, registerIpc } from './ipc/router';
 import { autoSummary } from './ai/auto';
@@ -38,6 +39,7 @@ async function boot(): Promise<{ ok: boolean; error: string | null }> {
     await connect(external ?? await pgServer.start({ tcp: dbTools(), password: dbPassword() }));
     await migrate(migrationsDir());
     dbState = { ok: true, error: null };
+    setLoopRules((await getSettings()).loopRules);
     // Re-check loops stored before the current rules (a thanks after your reply closes them).
     for (const chatId of await chatsWithOpenLoops()) await resolveLoops(chatId).catch(() => false);
     // WA_TURBO_OFFLINE=1 opens the stored data without connecting to WhatsApp (demo data, screenshots).
