@@ -4,6 +4,8 @@ User-visible changes to WA Turbo. The format follows [Keep a Changelog](https://
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-03
+
 Windows catches up with 0.4.0: the new AI connections, @ tags in groups and pasting photos all ship in the Windows installer, and their setup steps now read right on a PC.
 
 ### Fixed
