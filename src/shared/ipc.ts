@@ -1,6 +1,6 @@
 import type {
   Account, Accent, AiStatus, AutoStatus, Bootstrap, ChatSummaryRow, Loop, LoopDir, Message, PairState, Partner, PresetId,
-  AiProvider, ContactImportPreview, GroupMember, ContactImportResult, ContactsInfo, DbInfo, Lang, LocalFound, UiPrefs, Report, RunProgress, Settings, SummaryResult, SummaryWindow, TeamMember, UsageBucket,
+  AiProvider, ContactImportPreview, GroupMember, ContactImportResult, ContactsInfo, DbInfo, Lang, LocalFound, UiPrefs, Report, RestrictedRule, RunProgress, SendOutcome, Settings, SummaryResult, SummaryWindow, TeamMember, UsageBucket,
 } from './types';
 
 // Every call the window can make. The main process registers one handler per key (ipc/router.ts),
@@ -28,10 +28,10 @@ export interface Api {
   getMessages(chatId: string, limit: number): Promise<Message[]>;
   openChat(chatId: string): Promise<void>;
   /** Sends what the person typed, plus the photo they picked or pasted, tagging `mentions` (group members' IDs). */
-  sendMessage(chatId: string, text: string, photoToken: string | null, mentions: string[]): Promise<void>;
+  sendMessage(chatId: string, text: string, photoToken: string | null, mentions: string[], allowFlagged?: boolean): Promise<SendOutcome>;
   pickPhoto(): Promise<PickedPhoto | null>;
   /** A photo pasted into the composer, held like a picked one until it is sent. */
-  pastePhoto(data: Uint8Array, mime: string): Promise<PickedPhoto>;
+  pastePhoto(data: Uint8Array, mime: string, name?: string): Promise<PickedPhoto>;
   /** The people in a group chat, for @ tags. Empty for direct chats. */
   groupMembers(chatId: string): Promise<GroupMember[]>;
   /** The chat open in the window (null on other tabs), so it doesn't notify while you read it. */
@@ -41,7 +41,7 @@ export interface Api {
   testNotification(): Promise<void>;
   openNotificationSettings(): Promise<void>;
   /** Replaces the text of a message you sent, within WhatsApp's 15-minute limit. */
-  editMessage(messageId: string, text: string): Promise<void>;
+  editMessage(messageId: string, text: string, allowFlagged?: boolean): Promise<SendOutcome>;
   /** Deletes a message you sent for everyone in the chat, within about 2 days. */
   deleteForEveryone(messageId: string): Promise<void>;
   /** Save-as dialog for a photo or file in the chat. Null when cancelled. */
@@ -66,6 +66,8 @@ export interface Api {
   unlink(accountId: string): Promise<void>;
   /** The language the AI writes in for a number. Null forgets it, so it is detected again from the chats. */
   setNumberLang(accountId: string, lang: Lang | null): Promise<Account[]>;
+  /** A number's restricted words. Takes effect on the next message. */
+  setNumberRestricted(accountId: string, rule: RestrictedRule): Promise<void>;
   /** App language and theme, so notifications, the menu bar and the window background match. */
   setUiPrefs(p: UiPrefs): Promise<void>;
 
@@ -117,6 +119,8 @@ export interface Events {
   /** An auto run finished on a pinned chat: its new summary. */
   'summary': SummaryResult;
   'auto': AutoStatus;
+  /** The restricted words check is waiting on the AI. */
+  'checking': { chatId: string };
 }
 
 export interface PickedPhoto { token: string; name: string; size: number; preview: string }
@@ -128,13 +132,13 @@ export const API_KEYS: ApiKey[] = [
   'bootstrap', 'retryDb', 'dbInfo', 'setDbTools', 'showDbFolder', 'previewContacts', 'applyContacts', 'contactsInfo', 'clearContacts',
   'listChats', 'listAllChats', 'searchChats', 'getMessages', 'openChat', 'setActiveChat', 'setMuted', 'testNotification', 'openNotificationSettings', 'sendMessage', 'editMessage', 'deleteForEveryone', 'pickPhoto', 'pastePhoto', 'groupMembers', 'saveMedia', 'setChatPartner',
   'listLoops', 'flagMessage', 'loopAction', 'listTeam', 'setTeam', 'removeTeam', 'usage',
-  'startPairing', 'refreshPairing', 'cancelPairing', 'reconnect', 'unlink', 'setNumberLang', 'setUiPrefs',
+  'startPairing', 'refreshPairing', 'cancelPairing', 'reconnect', 'unlink', 'setNumberLang', 'setNumberRestricted', 'setUiPrefs',
   'getSettings', 'saveSettings', 'checkAi', 'testKey', 'disconnectKey', 'testProviderKey', 'disconnectProvider', 'detectLocal', 'aiDiagnostics',
   'summarize', 'cancelRun', 'lastSummary', 'setPinned', 'autoStatus',
   'listReports', 'generateReport', 'deleteReport', 'exportReport', 'copyText',
 ];
 
-export const EVENT_KEYS: EventKey[] = ['accounts', 'chats-changed', 'messages', 'messages-changed', 'open-chat', 'notify', 'settings', 'loops-changed', 'pair', 'progress', 'partners', 'summary', 'auto'];
+export const EVENT_KEYS: EventKey[] = ['accounts', 'chats-changed', 'messages', 'messages-changed', 'open-chat', 'notify', 'settings', 'loops-changed', 'pair', 'progress', 'partners', 'summary', 'auto', 'checking'];
 
 export type Unsubscribe = () => void;
 

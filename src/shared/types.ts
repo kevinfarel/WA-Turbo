@@ -20,7 +20,17 @@ export interface Account {
   lang: Lang | null;
   /** True when lang was detected from the chats rather than picked. */
   langDetected: boolean;
+  /** Words this number must never mention. */
+  restricted: RestrictedRule;
 }
+
+/** A number's restricted words. hard = no Send anyway. */
+export interface RestrictedRule { on: boolean; hard: boolean; words: string[] }
+
+/** What became of a send or an edit: it went out, or the restricted words check held it back. */
+export type SendOutcome =
+  | { sent: true; aiSkipped: boolean }
+  | { sent: false; number: string; words: string[]; by: 'exact' | 'ai'; hard: boolean; /** Set when only the attachment's name matched. */ file?: string };
 
 export type ChatKind = 'dm' | 'group';
 
