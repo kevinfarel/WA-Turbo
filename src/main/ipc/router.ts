@@ -3,20 +3,22 @@ import { randomUUID } from 'node:crypto';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 import type { Api, EventKey, Events } from '@shared/ipc';
-import type { AiProvider, AiStatus, Bootstrap, DbInfo, Loop } from '@shared/types';
+import type { AiProvider, AiStatus, Bootstrap, DbInfo, Loop, SendOutcome } from '@shared/types';
 import { activeModel, DEFAULT_MODELS, pickLocal, PROVIDERS } from '@shared/ai';
 import { dbPassword, dbTools, externalDatabaseUrl, getApiKey, getProviderKey, HERE, setApiKey, setDbTools, setProviderKey } from '../config';
 import * as Q from '../db/queries';
 import { isConnected, q1 } from '../db/client';
 import { pgHome, pgServer, portFree, PG_PORT, TOOLS_HOST } from '../db/server';
 import { flagMessage, loopAction, resolveLoops } from '../loops/service';
+import { setLoopRules } from '../loops/rules';
 import { resetClient, testKey } from '../ai/client';
 import { claudeCodeStatus, forgetClaude } from '../ai/claude-code';
 import { agyStatus, checkAgy, findAgy, forgetAgy } from '../ai/antigravity';
 import { codexStatus, findCodex, forgetCodex } from '../ai/codex';
+import { DEEPSEEK_ENV, deepseekKey, forgetDeepseek } from '../ai/deepseek';
 import { diagText } from '../ai/diag';
 import { localModels } from '../ai/local';
-import { compatTest, GEMINI_BASE } from '../ai/openai-compat';
+import { compatTest, DEEPSEEK_BASE, GEMINI_BASE } from '../ai/openai-compat';
 import { summarizeChat } from '../ai/summarize';
 import { generateReport } from '../ai/report';
 import { autoSummary } from '../ai/auto';
@@ -27,6 +29,8 @@ import type { WaManager } from '../wa/manager';
 import { cacheMedia, extOf, loadMedia } from '../media';
 import { applyContacts, guessCountry, previewContacts } from '../contacts/import';
 import { formatPhone } from '@shared/phone';
+import { cleanWords } from '@shared/restricted';
+import { screenMessage } from '../ai/restricted';
 
 export function broadcast<K extends EventKey>(key: K, payload: Events[K]): void {
   for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send('evt', key, payload);
@@ -36,7 +40,7 @@ export function broadcast<K extends EventKey>(key: K, payload: Events[K]): void 
 const runs = new Map<string, AbortController>();
 
 // Photos picked or pasted in the composer, by token, so the window never hands the main process a file path.
-const picked = new Map<string, { path: string } | { buf: Buffer; mime: string }>();
+const picked = new Map<string, { path: string } | { buf: Buffer; mime: string; name?: string }>();
 let lastSend = { key: '', at: 0 };
 const MAX_PHOTO_BYTES = 16 * 1024 * 1024;
 // WhatsApp's own limits: edits within 15 minutes, delete for everyone within about 2 days.
@@ -98,6 +102,10 @@ export async function aiStatus(provider: AiProvider): Promise<AiStatus> {
       const s = await Q.getSettings();
       return { ...base, connected: !!getProviderKey('gemini') && s.geminiAgreed };
     }
+    case 'deepseek': {
+      const [s, found] = await Promise.all([Q.getSettings(), deepseekKey()]);
+      return { ...base, connected: !!found && s.deepseekAgreed, cliFound: !!found, account: found?.from === 'env' ? DEEPSEEK_ENV : null };
+    }
     case 'openai': {
       const s = await Q.getSettings();
       return { ...base, connected: !!s.openaiBaseUrl && !!s.openaiModel, account: s.openaiBaseUrl || null };
@@ -156,6 +164,15 @@ export function registerIpc(d: RouterDeps): void {
       if (!body.includes('@' + j.split('@')[0])) throw new Error('A tag was removed from the message. Tag the person again.');
     }
     return list;
+  };
+
+  // Restricted words: runs here so nothing in the window can skip it, and only ever holds a message back.
+  const screenText = async (accountId: string, chatId: string, body: string, allowFlagged: boolean, attachment?: string): Promise<SendOutcome> => {
+    const a = await Q.accountRestricted(accountId);
+    if (!a) return { sent: true, aiSkipped: false };
+    const r = await screenMessage({ rule: a.rule, text: body, attachment, chatId, allowFlagged, onAsk: () => broadcast('checking', { chatId }) });
+    if (r.ok) return { sent: true, aiSkipped: r.aiSkipped };
+    return { sent: false, number: a.name, words: r.words, by: r.by, hard: a.rule.hard, ...(r.fileOnly ? { file: attachment } : {}) };
   };
 
   const ownMessage = async (messageId: string) => {
@@ -227,7 +244,7 @@ export function registerIpc(d: RouterDeps): void {
 
     // The one way out to WhatsApp: a message typed in the composer and sent with the window in front.
     // Nothing in WA Turbo sends on a timer, on a rule, or from Claude's output.
-    sendMessage: async (chatId, text, photoToken, mentions) => {
+    sendMessage: async (chatId, text, photoToken, mentions, allowFlagged = false) => {
       if (!BrowserWindow.getFocusedWindow()) throw new Error('Messages are sent only from the WA Turbo window while it is in front.');
       const body = text.trim();
       const photo = photoToken ? picked.get(photoToken) : undefined;
@@ -236,8 +253,13 @@ export function registerIpc(d: RouterDeps): void {
       if (body.length > 4096) throw new Error('That message is too long for WhatsApp. Split it in two.');
       const key = chatId + '\n' + body + '\n' + (photoToken ?? '');
       if (key === lastSend.key && Date.now() - lastSend.at < 3000) throw new Error('That message was just sent.');
-      lastSend = { key, at: Date.now() };
       const c = await chatRef(chatId);
+      // Before lastSend: a message held back was not sent, so Send anyway must not look like a repeat.
+      // WhatsApp never receives a photo's file name, but a name from the wrong side usually means the wrong photo.
+      const attachment = photo ? ('path' in photo ? basename(photo.path) : photo.name) : undefined;
+      const checked = await screenText(c.account_id, c.id, body, allowFlagged, attachment);
+      if (!checked.sent) return checked;
+      lastSend = { key, at: Date.now() };
       const tags = await checkMentions(c, body, mentions);
       const image = photo ? ('path' in photo ? await readPhoto(photo.path) : photo) : undefined;
       const waId = await d.manager.send(c.account_id, c.jid, { text: body, image, mentions: tags });
@@ -246,9 +268,10 @@ export function registerIpc(d: RouterDeps): void {
         const id = await Q.messageIdByWa(c.id, waId);
         if (id) await cacheMedia(c.account_id, id, image.mime, image.buf);
       }
+      return checked;
     },
     // Edit and delete for everyone: only your own messages, only from the window, inside WhatsApp's limits.
-    editMessage: async (messageId, text) => {
+    editMessage: async (messageId, text, allowFlagged = false) => {
       if (!BrowserWindow.getFocusedWindow()) throw new Error('Messages are edited only from the WA Turbo window while it is in front.');
       const body = text.trim();
       if (!body) throw new Error('A message cannot be empty. Delete it instead.');
@@ -256,9 +279,12 @@ export function registerIpc(d: RouterDeps): void {
       const m = await ownMessage(messageId);
       if (m.type !== 'text') throw new Error('Only text messages can be edited.');
       if (Date.now() - m.sent_at > EDIT_WINDOW_MS) throw new Error('WhatsApp only allows edits within 15 minutes of sending.');
+      const checked = await screenText(m.account_id, m.chat_id, body, allowFlagged);
+      if (!checked.sent) return checked;
       await d.manager.edit(m.account_id, m.jid, keyOf(m), body);
       await Q.editMessage(m.chat_id, m.wa_id, body);
       broadcast('messages-changed', { chatId: m.chat_id });
+      return checked;
     },
     deleteForEveryone: async messageId => {
       if (!BrowserWindow.getFocusedWindow()) throw new Error('Messages are deleted only from the WA Turbo window while it is in front.');
@@ -284,10 +310,11 @@ export function registerIpc(d: RouterDeps): void {
       picked.set(token, { path });
       return { token, name: basename(path), size, preview: img.resize({ height: 120 }).toDataURL() };
     },
-    pastePhoto: async (data, mime) => {
+    pastePhoto: async (data, mime, name) => {
       const p = pastedPhoto(data, mime);
       const token = randomUUID();
-      picked.set(token, { buf: p.buf, mime: p.mime });
+      // A file copied in Finder keeps its name; a screenshot has none worth reading.
+      picked.set(token, { buf: p.buf, mime: p.mime, ...(typeof name === 'string' && name ? { name: basename(name).slice(0, 255) } : {}) });
       return { token, name: 'Pasted photo.' + extOf(p.mime), size: p.buf.length, preview: p.img.resize({ height: 120 }).toDataURL() };
     },
     groupMembers: async chatId => {
@@ -380,6 +407,9 @@ export function registerIpc(d: RouterDeps): void {
       broadcast('accounts', accounts);
       return accounts;
     },
+    setNumberRestricted: async (id, rule) => {
+      await Q.setAccountRestricted(id, { on: !!rule?.on, hard: !!rule?.hard, words: cleanWords(rule?.words) });
+    },
     setUiPrefs: async p => {
       applyUi(p);
       await notifier.apply(await Q.getSettings());
@@ -389,13 +419,14 @@ export function registerIpc(d: RouterDeps): void {
     saveSettings: async patch => {
       if (patch.openAtLogin !== undefined) app.setLoginItemSettings({ openAtLogin: patch.openAtLogin });
       const saved = await Q.saveSettings(patch);
+      if (patch.loopRules) setLoopRules(saved.loopRules);
       await notifier.apply(saved);
       if (['autoOn', 'pinEveryMin', 'pinWindow', 'otherEveryMin', 'otherWindow', 'provider', 'autoDailyBudget'].some(k => k in patch)) await autoSummary.schedule();
       return saved;
     },
     autoStatus: async () => autoSummary.status(),
     checkAi: async deep => {
-      forgetClaude(); forgetAgy(); forgetCodex();
+      forgetClaude(); forgetAgy(); forgetCodex(); forgetDeepseek();
       const s = await Q.getSettings();
       if (deep && s.provider === 'antigravity' && (await findAgy())) {
         try { await checkAgy(s.agyModel); } catch (e) {
@@ -423,11 +454,18 @@ export function registerIpc(d: RouterDeps): void {
     testProviderKey: async (provider, key) => {
       try {
         const s = await Q.getSettings();
-        const k = key?.trim() || getProviderKey(provider);
+        const deepseek = provider === 'deepseek';
+        if (deepseek) forgetDeepseek();
+        const k = key?.trim() || (deepseek ? (await deepseekKey())?.key ?? null : getProviderKey(provider));
         if (provider === 'gemini' && !k) throw new Error('Paste your Gemini key first.');
+        if (deepseek && !k) throw new Error('Paste your DeepSeek key first.');
         if (provider === 'openai' && !s.openaiBaseUrl) throw new Error('Enter the service address first, e.g. https://api.groq.com/openai/v1.');
         if (provider === 'openai' && !s.openaiModel) throw new Error('Enter the model name first.');
-        await compatTest({ kind: provider, baseUrl: provider === 'gemini' ? GEMINI_BASE : s.openaiBaseUrl, key: k, model: provider === 'gemini' ? s.geminiModel || DEFAULT_MODELS.gemini : s.openaiModel });
+        await compatTest({
+          kind: provider, key: k,
+          baseUrl: provider === 'gemini' ? GEMINI_BASE : deepseek ? DEEPSEEK_BASE : s.openaiBaseUrl,
+          model: provider === 'gemini' ? s.geminiModel || DEFAULT_MODELS.gemini : deepseek ? s.deepseekModel || DEFAULT_MODELS.deepseek : s.openaiModel,
+        });
         if (key?.trim()) setProviderKey(provider, key.trim());
         langDetect.poke(true);
         await autoSummary.schedule();

@@ -1,18 +1,20 @@
 import type pg from 'pg';
 import type {
   Account, Accent, AccountStatus, ChatInsight, Lang, ChatKind, ChatSummaryRow, Loop, LoopDir, LoopKind, LoopSource, LoopState,
-  Message, MessageType, ModelId, Partner, PresetId, Report, Settings, SummaryResult, TeamMember, UsageBucket,
+  Message, MessageType, ModelId, Partner, PresetId, Report, RestrictedRule, Settings, SummaryResult, TeamMember, UsageBucket,
 } from '@shared/types';
 import { withMentions } from '@shared/mentions';
+import { cleanWords } from '@shared/restricted';
 import { formatPhone } from '@shared/phone';
 import { DEFAULT_SLA_H } from '@shared/sla';
 import { q, q1, tx } from './client';
 
 /* ---------------- accounts ---------------- */
 
-interface AccountRow { id: string; name: string; description: string; phone: string; accent: Accent; status: AccountStatus; paired_at: number | null; jid: string | null; ai_lang: Lang | null; ai_lang_detected: boolean }
+interface AccountRow { id: string; name: string; description: string; phone: string; accent: Accent; status: AccountStatus; paired_at: number | null; jid: string | null; ai_lang: Lang | null; ai_lang_detected: boolean; restricted_on: boolean; restricted_hard: boolean; restricted_words: string[] }
 const toAccount = (r: AccountRow): Account => ({
   id: r.id, name: r.name, desc: r.description, phone: r.phone, accent: r.accent, status: r.status, pairedAt: r.paired_at, lang: r.ai_lang, langDetected: r.ai_lang_detected,
+  restricted: { on: r.restricted_on, hard: r.restricted_hard, words: cleanWords(r.restricted_words) },
 });
 
 export async function listAccounts(): Promise<Account[]> {
@@ -39,6 +41,16 @@ export async function updateAccount(id: string, p: { status?: AccountStatus; pho
 /** Sets the language Claude writes in for a number. detected = chosen by WA Turbo from the chats, not by you. */
 export async function setAccountLang(id: string, lang: Lang, detected: boolean): Promise<void> {
   await q('UPDATE accounts SET ai_lang = $2, ai_lang_detected = $3 WHERE id = $1', [id, lang, detected]);
+}
+
+/** The restricted words of the number a message goes out from. */
+export async function accountRestricted(id: string): Promise<{ name: string; rule: RestrictedRule } | null> {
+  const r = await q1<AccountRow>('SELECT * FROM accounts WHERE id = $1', [id]);
+  return r ? { name: r.name, rule: toAccount(r).restricted } : null;
+}
+
+export async function setAccountRestricted(id: string, r: RestrictedRule): Promise<void> {
+  await q('UPDATE accounts SET restricted_on = $2, restricted_hard = $3, restricted_words = $4::text[] WHERE id = $1', [id, r.on, r.hard, r.words]);
 }
 
 export async function forgetAccountLang(id: string): Promise<void> {
@@ -659,10 +671,10 @@ export async function reviewLoop(id: string, p: { topic?: string | null; blocks?
 
 export const DEFAULT_SETTINGS: Settings = {
   provider: 'claude-code', model: 'claude-haiku-5-5', window: 'week', customPrompt: '', openAtLogin: false, aiImages: true,
-  localModel: '', geminiModel: '', openaiModel: '', openaiBaseUrl: '', agyModel: '', codexModel: '', geminiAgreed: false, autoDailyBudget: 100,
+  localModel: '', geminiModel: '', deepseekModel: '', openaiModel: '', openaiBaseUrl: '', agyModel: '', codexModel: '', geminiAgreed: false, deepseekAgreed: false, autoDailyBudget: 100,
   autoOn: true, pinEveryMin: 5, pinWindow: 10, otherEveryMin: 60, otherWindow: 2,
   notifyOn: true, notifyPinnedSound: 'Glass', notifyRemindMin: 10, notifyOthers: 'direct', notifyOtherSound: 'Tink', notifyPreview: true,
-  notifyBadge: 'chats', notifyOverdue: true, menuBar: true, notifyPausedUntil: 0, contactsCountry: '',
+  notifyBadge: 'chats', notifyOverdue: true, menuBar: true, notifyPausedUntil: 0, contactsCountry: '', loopRules: {},
 };
 
 export async function getSettings(): Promise<Settings> {

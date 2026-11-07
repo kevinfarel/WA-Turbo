@@ -2,14 +2,56 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('electron', () => ({ app: { getPath: () => '/tmp/wat', isPackaged: false, getAppPath: () => '/tmp' }, safeStorage: { isEncryptionAvailable: () => false } }));
-const { activeModel, cheapModel, modelLabel, pickLocal, splitModel, PROVIDERS } = await import('../../src/shared/ai');
+const { activeModel, cheapModel, deepseekSeesPhotos, modelLabel, pickLocal, splitModel, PROVIDERS } = await import('../../src/shared/ai');
 const { capWait, nextMidnight, nextPacificMidnight } = await import('../../src/main/ai/schedule');
 const { contextFor } = await import('../../src/main/ai/local');
 const { compatBody, compatError } = await import('../../src/main/ai/openai-compat');
 const { parseCodex, codexError } = await import('../../src/main/ai/codex');
+const { parseShellKey } = await import('../../src/main/ai/deepseek');
 const { parseAgy } = await import('../../src/main/ai/antigravity');
 
-const base = { model: 'claude-haiku-5-5' as const, localModel: 'gemma4:e4b', geminiModel: '', openaiModel: 'llama-4', agyModel: '', codexModel: '' };
+const base = { model: 'claude-haiku-5-5' as const, localModel: 'gemma4:e4b', geminiModel: '', deepseekModel: '', openaiModel: 'llama-4', agyModel: '', codexModel: '' };
+
+describe('DeepSeek', () => {
+  const t = { kind: 'deepseek' as const, baseUrl: 'https://api.deepseek.com', key: 'k', model: 'deepseek-flash' };
+  const schema = { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] };
+  const image = { type: 'image' as const, source: { type: 'base64' as const, media_type: 'image/png' as const, data: 'AAAA' } };
+
+  it('uses JSON mode with the schema in the prompt, since it takes no schema input', () => {
+    const b = compatBody(t, 'Summarize.', [{ type: 'text', text: 'hi' }], schema, 'medium') as { response_format: object; messages: { content: string }[]; max_tokens: number };
+    expect(b.response_format).toEqual({ type: 'json_object' });
+    expect(b.messages[0].content).toContain('JSON');
+    expect(b.messages[0].content).toContain('"required":["summary"]');
+    expect(b.max_tokens).toBeGreaterThan(0);
+  });
+  it('sends photos in the OpenAI shape', () => {
+    const b = compatBody(t, 's', [image, { type: 'text', text: 'hi' }], schema, 'low') as { messages: { content: { image_url?: { url: string } }[] }[] };
+    expect(b.messages[1].content[0].image_url?.url).toBe('data:image/png;base64,AAAA');
+  });
+  it('maps effort to thinking, so short runs do not pay for it', () => {
+    const effort = (e: 'low' | 'medium' | 'high') => (compatBody(t, 's', [], schema, e) as { reasoning_effort: string }).reasoning_effort;
+    expect([effort('low'), effort('medium'), effort('high')]).toEqual(['none', 'low', 'high']);
+  });
+  it('only sends photos to the Flash models', () => {
+    expect(deepseekSeesPhotos('deepseek-flash')).toBe(true);
+    expect(deepseekSeesPhotos('deepseek-v4-pro')).toBe(false);
+  });
+  it('names the empty balance and pauses auto summary for an hour', () => {
+    const e = compatError(t, 402, { error: { message: 'Insufficient Balance' } }, null, 1000);
+    expect(e.code).toBe('rate_limited');
+    expect(e.retryAt).toBe(1000 + 60 * 60_000);
+    expect(e.message).toMatch(/balance is empty/);
+  });
+  it('sends a rejected key to the DeepSeek platform', () => {
+    expect(compatError(t, 401, {}, null).message).toMatch(/platform\.deepseek\.com/);
+  });
+  it('picks the key out of noisy shell output', () => {
+    const m = '<<wa-turbo-key>>';
+    expect(parseShellKey(`Welcome back!\n${m}sk-abc${m}`)).toBe('sk-abc');
+    expect(parseShellKey(m + m)).toBeNull();
+    expect(parseShellKey('zsh: no such file')).toBeNull();
+  });
+});
 
 describe('model ids per provider', () => {
   it('keeps Claude ids bare and prefixes the others', () => {
@@ -18,11 +60,14 @@ describe('model ids per provider', () => {
     expect(activeModel({ ...base, provider: 'local' })).toBe('local:gemma4:e4b');
     expect(activeModel({ ...base, provider: 'gemini' })).toBe('gemini:gemini-flash-latest');
     expect(activeModel({ ...base, provider: 'openai' })).toBe('openai:llama-4');
+    expect(activeModel({ ...base, provider: 'deepseek' })).toBe('deepseek:deepseek-flash');
+    expect(activeModel({ ...base, provider: 'deepseek', deepseekModel: 'deepseek-v4-pro' })).toBe('deepseek:deepseek-v4-pro');
     expect(activeModel({ ...base, provider: 'codex' })).toBe('codex:');
   });
   it('language detection uses Haiku on Claude and the chosen model elsewhere', () => {
     expect(cheapModel({ ...base, model: 'claude-opus-5-5', provider: 'claude-code' })).toBe('claude-haiku-5-5');
     expect(cheapModel({ ...base, provider: 'local' })).toBe('local:gemma4:e4b');
+    expect(cheapModel({ ...base, provider: 'deepseek', deepseekModel: 'deepseek-v4-pro' })).toBe('deepseek:deepseek-flash');
   });
   it('splits a model id back and names it for the window', () => {
     expect(splitModel('local:qwen3.5:4b')).toEqual({ provider: 'local', name: 'qwen3.5:4b' });
@@ -35,7 +80,7 @@ describe('model ids per provider', () => {
   it('marks which providers are free, metered and experimental', () => {
     expect(Object.values(PROVIDERS).filter(p => p.free).map(p => p.id).sort()).toEqual(['antigravity', 'gemini', 'local']);
     expect(Object.values(PROVIDERS).filter(p => p.quota).map(p => p.id).sort()).toEqual(['antigravity', 'gemini']);
-    expect(Object.values(PROVIDERS).filter(p => p.experimental).map(p => p.id).sort()).toEqual(['antigravity', 'codex']);
+    expect(Object.values(PROVIDERS).filter(p => p.experimental).map(p => p.id).sort()).toEqual(['antigravity', 'codex', 'deepseek']);
   });
 });
 

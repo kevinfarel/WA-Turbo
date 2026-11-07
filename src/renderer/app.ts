@@ -1,14 +1,16 @@
 // WA Turbo window. Ported from the OpenDesign mockup's own render code (same markup, classes and copy),
 // with its demo data replaced by live data from the main process over window.api.
-// The only send in this file is sendFromComposer(): what you typed, when you press Send or Enter.
+// The only send in this file is sendFromComposer(): what you typed, when you press Send, Enter or Send anyway.
 
 import type { Bridge, PickedPhoto } from '@shared/ipc';
 import type { ContactImportPreview, ContactSource, ContactsInfo, DbInfo, GroupMember,
-  Account, Accent, AiProvider, AiStatus, AutoStatus, ChatInsight, ChatSummaryRow, ClaudeModel, LocalFound, Loop, Message, PairState, Partner, PresetId, Report, RunProgress, Settings, SummaryResult, TeamMember, UsageBucket,
+  Account, Accent, AiProvider, AiStatus, AutoStatus, ChatInsight, ChatSummaryRow, ClaudeModel, LocalFound, Loop, Message, PairState, Partner, PresetId, Report, RunProgress, SendOutcome, Settings, SummaryResult, TeamMember, UsageBucket,
 } from '@shared/types';
 import { fmtDur, loopAge, loopPending, loopSla, setDurLang, SLA_LABEL, SLA_ORDER } from '@shared/sla';
 import { EMPTY_WEEK, PRESETS } from '@shared/presets';
+import { addRuleTerm, MAX_TERM, removeRuleTerm, RULE_GROUPS, rulesChanged, toggleRuleTerm, type RuleGroup } from '@shared/rule-terms';
 import { encodeMentions, type PickedMention } from '@shared/mentions';
+import { cleanWords, coveredBy, MAX_WORD, MAX_WORDS, tidyWord } from '@shared/restricted';
 import { activeModel, FREE_CAP, isClaude, modelLabel, PROVIDERS } from '@shared/ai';
 import { esc, fmtText } from './format';
 import { weekStart } from '@shared/week';
@@ -116,6 +118,8 @@ const state = {
   tags: new Map<string, PickedMention[]>(),
   mention: null as null | { chatId: string; start: number; query: string; idx: number },
   sending: false,
+  /** The restricted words check is waiting on the AI. */
+  checking: false,
   editing: null as null | { msgId: string; text: string },
   team: [] as TeamMember[],
   usage: null as UsageBucket[] | null,
@@ -367,8 +371,8 @@ async function setTeam(messageId: string, on: boolean, who: string): Promise<voi
   } catch (e) { fail(e); }
 }
 
-/** Saves the edit open in the chat, once, right now. Called only by the Save button and Enter. */
-async function saveEdit(): Promise<void> {
+/** Saves the edit open in the chat, once, right now. Called only by the Save button, Enter and Save anyway. */
+async function saveEdit(allowFlagged = false): Promise<void> {
   const ed = state.editing;
   if (!ed || state.sending) return;
   const box = document.getElementById('editBox') as HTMLTextAreaElement | null;
@@ -376,16 +380,25 @@ async function saveEdit(): Promise<void> {
   const m = msgById(ed.msgId);
   if (m && text === m.text.trim()) { state.editing = null; renderConvoKeepScroll(); return; }
   state.sending = true;
+  if (box) box.readOnly = true;
+  let held: Held | null = null;
   try {
-    await api.editMessage(ed.msgId, text);
-    state.editing = null;
-    if (m) { m.text = text; m.edited = true; }
-    toast('Message edited', 'ok');
+    const r = await api.editMessage(ed.msgId, text, allowFlagged);
+    if (r.sent) {
+      state.editing = null;
+      if (m) { m.text = text; m.edited = true; }
+      toast(r.aiSkipped ? AI_SKIPPED : 'Message edited', 'ok');
+    } else {
+      ed.text = text;
+      held = r;
+    }
   } catch (e) {
     fail(e);
   }
   state.sending = false;
+  state.checking = false;
   renderConvoKeepScroll();
+  if (held) showFlagged(held, { kind: 'edit', msgId: ed.msgId });
 }
 
 /** Deletes one of your messages for everyone. Called only from the confirm dialog. */
@@ -436,10 +449,10 @@ function renderConvo(): void {
       ' id="msg-' + c.id + '-' + m.id + '" data-mid="' + m.id + '" style="--acc:' + accentOf(c) + '">' +
       (!mine && c.kind === 'group' ? '<span class="who"><span translate="no">' + esc(m.who) + '</span>' + (m.team ? '<span class="team-tag">Team</span>' : '') + '</span>' : '') +
       (editing
-        ? '<div class="edit-box"><label><span class="vh">Edit message</span><textarea id="editBox" rows="1">' + esc(state.editing!.text) + '</textarea></label>' +
+        ? '<div class="edit-box"><label><span class="vh">Edit message</span><textarea id="editBox" rows="1"' + (state.sending ? ' readonly' : '') + '>' + esc(state.editing!.text) + '</textarea></label>' +
             '<div class="edit-acts"><span class="od-fill hint">Enter to save · Shift+Enter for a new line · Esc to cancel</span>' +
             '<button type="button" class="btn btn-sm" id="editCancel">Cancel</button>' +
-            '<button type="button" class="btn btn-sm btn-primary" id="editSave">Save</button></div></div>'
+            '<button type="button" class="btn btn-sm btn-primary" id="editSave">' + (state.checking ? 'Checking…' : 'Save') + '</button></div></div>'
         : m.text ? '<span class="tx" translate="no">' + fmtText(m.text, shownMentions(m)) + '</span>' : '') +
       mediaFigure(m) +
       '<div class="mt-row">' + tools +
@@ -502,14 +515,14 @@ function renderConvo(): void {
       '<div class="mention-pop" id="mentionPop" role="listbox" aria-label="People to tag" hidden></div>' +
       (photo
         ? '<div class="attach-chip"><img src="' + photo.preview + '" alt=""><span class="od-fill od-truncate">' + esc(photo.name) + ' · ' + fmtBytes(photo.size) + '</span>' +
-            '<button type="button" class="icon-btn" id="attachClear" aria-label="Remove photo">' + icon('trash', 14) + '</button></div>'
+            '<button type="button" class="icon-btn" id="attachClear" aria-label="Remove photo"' + (state.sending ? ' disabled' : '') + '>' + icon('trash', 14) + '</button></div>'
         : '') +
       '<div class="composer">' +
-        '<button type="button" class="icon-btn" id="attachBtn" title="Send a photo (or paste one)" aria-label="Send a photo"' + (online ? '' : ' disabled') + '>' + icon('clip', 17) + '</button>' +
+        '<button type="button" class="icon-btn" id="attachBtn" title="Send a photo (or paste one)" aria-label="Send a photo"' + (online && !state.sending ? '' : ' disabled') + '>' + icon('clip', 17) + '</button>' +
         '<label class="od-fill"><span class="vh">Message ' + esc(c.name) + '</span>' +
           '<textarea id="composer" rows="1" placeholder="' + (online ? (photo ? 'Add a caption…' : c.kind === 'group' ? 'Write a message… (@ to tag, Shift+Enter for a new line)' : 'Write a message… (Shift+Enter for a new line)') : 'This number is offline. You can send once it reconnects.') + '"' +
-            (online ? '' : ' disabled') + '>' + esc(draft) + '</textarea></label>' +
-        '<button type="button" class="send" id="sendBtn" aria-label="Send message"' + (online && (draft.trim() || photo) && !state.sending ? '' : ' disabled') + '>' + icon('send', 16) + '</button>' +
+            (online ? '' : ' disabled') + (state.sending ? ' readonly' : '') + '>' + esc(draft) + '</textarea></label>' +
+        '<button type="button" class="send' + (state.checking ? ' checking' : '') + '" id="sendBtn" aria-label="Send message"' + (online && (draft.trim() || photo) && !state.sending ? '' : ' disabled') + '>' + icon('send', 16) + '</button>' +
       '</div>' +
     '</div>';
 
@@ -535,8 +548,38 @@ function fitComposer(ta: HTMLTextAreaElement, max = 200): void {
 
 const fmtBytes = (n: number): string => (n < 1024 * 1024 ? Math.max(1, Math.round(n / 1024)) + ' KB' : (n / 1024 / 1024).toFixed(1) + ' MB');
 
-/** Sends exactly what is in the composer, once, right now. Called only by the Send button and Enter. */
-async function sendFromComposer(): Promise<void> {
+type Held = Extract<SendOutcome, { sent: false }>;
+const AI_SKIPPED = 'Sent. The AI check was skipped, so only exact words were checked.';
+type FlaggedTarget = { kind: 'send'; chatId: string; text: string } | { kind: 'edit'; msgId: string };
+let flagged: FlaggedTarget | null = null;
+
+/** Holds a message back: says which word on which number, with no way past it on a hard block. */
+function showFlagged(r: Held, target: FlaggedTarget): void {
+  flagged = r.hard ? null : target;
+  const words = r.words.join(', ');
+  $('#flTitle').textContent = r.hard ? 'Message blocked' : 'Check this message';
+  const mentions = (r.by === 'ai' ? 'looks like it mentions ' : 'mentions ') + words + '.';
+  $('#flBody').textContent = r.file ? 'The attachment “' + r.file + '” goes out from ' + r.number + ' and its name ' + mentions : 'This message goes out from ' + r.number + ' and ' + mentions;
+  const go = $<HTMLButtonElement>('#flaggedGo');
+  go.hidden = r.hard;
+  go.textContent = target.kind === 'edit' ? 'Save anyway' : 'Send anyway';
+  openDlg('#dlgFlagged');
+}
+
+/** Send anyway stands only for the message it was asked about: a chat opened from a notification must not inherit it. */
+function takeFlagged(): 'send' | 'edit' | null {
+  const f = flagged;
+  flagged = null;
+  closeDlg($<HTMLDialogElement>('#dlgFlagged'));
+  if (!f) return null;
+  const same = f.kind === 'edit' ? state.editing?.msgId === f.msgId
+    : state.chat === f.chatId && (document.getElementById('composer') as HTMLTextAreaElement | null)?.value.trim() === f.text;
+  if (!same) { toast('That message changed. Send it again.'); return null; }
+  return f.kind;
+}
+
+/** Sends exactly what is in the composer, once, right now. Called only by the Send button, Enter and Send anyway. */
+async function sendFromComposer(allowFlagged = false): Promise<void> {
   const c = chatById(state.chat);
   if (!c || state.sending) return;
   const ta = document.getElementById('composer') as HTMLTextAreaElement | null;
@@ -546,19 +589,32 @@ async function sendFromComposer(): Promise<void> {
   state.sending = true;
   const btn = document.getElementById('sendBtn') as HTMLButtonElement | null;
   if (btn) btn.disabled = true;
+  // The check can take seconds with an AI: what you type meanwhile must not be sent or wiped.
+  if (ta) ta.readOnly = true;
+  document.querySelectorAll<HTMLButtonElement>('#attachBtn,#attachClear').forEach(b => { b.disabled = true; });
+  let held: Held | null = null;
   try {
     const tagged = encodeMentions(text, state.tags.get(c.id) ?? []);
-    await api.sendMessage(c.id, tagged.text, photo?.token ?? null, tagged.jids);
-    state.drafts.delete(c.id);
-    state.tags.delete(c.id);
-    if (photo) state.photo = null;
-    if (ta) ta.value = '';
+    const r = await api.sendMessage(c.id, tagged.text, photo?.token ?? null, tagged.jids, allowFlagged);
+    if (r.sent) {
+      state.drafts.delete(c.id);
+      state.tags.delete(c.id);
+      if (photo) state.photo = null;
+      if (ta) ta.value = '';
+      if (r.aiSkipped) toast(AI_SKIPPED);
+    } else {
+      state.drafts.set(c.id, text);
+      held = r;
+    }
   } catch (e) {
     fail(e);
   }
   state.sending = false;
-  renderConvo();
+  state.checking = false;
+  if (held && state.chat !== c.id) { setView('inbox'); await openChat(c.id); } else if (held && state.view !== 'inbox') setView('inbox');
+  else renderConvo();
   document.getElementById('composer')?.focus();
+  if (held) showFlagged(held, { kind: 'send', chatId: c.id, text });
 }
 
 async function attachPhoto(): Promise<void> {
@@ -572,7 +628,7 @@ async function attachPhoto(): Promise<void> {
 async function pastePhoto(file: File): Promise<void> {
   const c = chatById(state.chat); if (!c) return;
   try {
-    const p = await api.pastePhoto(new Uint8Array(await file.arrayBuffer()), file.type);
+    const p = await api.pastePhoto(new Uint8Array(await file.arrayBuffer()), file.type, file.name);
     state.photo = { ...p, chatId: c.id }; renderConvo(); document.getElementById('composer')?.focus();
   } catch (e) { fail(e); }
 }
@@ -1122,6 +1178,8 @@ function renderSettings(): void {
   renderAppearance();
   renderLangList();
   renderTeam();
+  renderRules();
+  renderRestricted();
   void loadUsage();
   void loadDb();
   void loadContacts();
@@ -1461,6 +1519,123 @@ async function setDbTools(on: boolean): Promise<void> {
   }
 }
 
+/* --- SUM UP! rules --- */
+function renderRules(force = false): void {
+  const el = document.getElementById('ruleGroups'); if (!el) return;
+  // Settings redraws for many reasons; never under someone typing a word or using the keyboard here.
+  if (!force && el.contains(document.activeElement)) return;
+  const open = new Set([...el.querySelectorAll<HTMLElement>('details[open]')].map(d => d.dataset.ruleGroup));
+  const rules = state.settings.loopRules;
+  el.innerHTML = RULE_GROUPS.map(g => {
+    const off = rules[g.id]?.off ?? [], add = rules[g.id]?.add ?? [];
+    const nOff = g.terms.filter(t => off.includes(t.label)).length;
+    const counts = [(g.terms.length - nOff) + ' on', nOff ? nOff + ' off' : '', add.length ? add.length + ' added' : ''].filter(Boolean).join(' · ');
+    return '<details class="rule-grp" data-rule-group="' + g.id + '"' + (open.has(g.id) ? ' open' : '') + '>' +
+      '<summary><b>' + esc(g.title) + '</b> <span class="kv">' + counts + '</span></summary>' +
+      '<div class="rule-body"><p class="hint">' + esc(g.hint) + '</p><div class="rule-chips">' +
+      g.terms.map(t => {
+        const on = !off.includes(t.label);
+        return '<button type="button" class="rule-chip" aria-pressed="' + on + '" data-rule-term="' + esc(t.label) + '" title="' + (on ? 'Switch off' : 'Switch back on') + '"><span translate="no">' + esc(t.label) + '</span></button>';
+      }).join('') +
+      add.map(t => '<button type="button" class="rule-chip added" data-rule-added="' + esc(t) + '" title="Remove"><span translate="no">' + esc(t) + '</span>' + icon('x', 11) + '</button>').join('') +
+      '</div><div class="rule-add"><input type="text" data-rule-input maxlength="' + MAX_TERM + '" placeholder="Add a word or phrase" aria-label="Add a word or phrase">' +
+      '<button type="button" class="btn btn-sm" data-rule-add>Add</button></div></div></details>';
+  }).join('');
+  $('#rulesReset').hidden = !rulesChanged(rules);
+}
+
+let rulesSaving: Promise<unknown> = Promise.resolve();
+/** Draws at once and saves in click order, so quick clicks can't land out of order. */
+function setRules(next: Settings['loopRules']): void {
+  state.settings.loopRules = next;
+  renderRules(true);
+  rulesSaving = rulesSaving.then(() => api.saveSettings({ loopRules: next })).catch(fail);
+}
+
+const ruleBox = (g: RuleGroup): HTMLElement => document.querySelector<HTMLElement>('[data-rule-group="' + g.id + '"]')!;
+
+function addRule(g: RuleGroup): void {
+  const input = ruleBox(g).querySelector<HTMLInputElement>('[data-rule-input]')!;
+  const r = addRuleTerm(state.settings.loopRules, g, input.value);
+  if (r.status === 'empty') return;
+  if (r.status === 'exists') { toast('That word is already in this list'); input.select(); return; }
+  setRules(r.rules);
+  ruleBox(g).querySelector<HTMLInputElement>('[data-rule-input]')!.focus();
+  if (r.status === 'restored') toast('Switched back on', 'ok');
+}
+
+function ruleClick(b: HTMLElement): void {
+  const g = RULE_GROUPS.find(x => x.id === b.closest<HTMLElement>('[data-rule-group]')?.dataset.ruleGroup);
+  if (!g) return;
+  const { ruleTerm, ruleAdded } = b.dataset;
+  if (ruleTerm !== undefined) {
+    setRules(toggleRuleTerm(state.settings.loopRules, g.id, ruleTerm));
+    [...ruleBox(g).querySelectorAll<HTMLElement>('[data-rule-term]')].find(c => c.dataset.ruleTerm === ruleTerm)?.focus();
+  } else if (ruleAdded !== undefined) {
+    setRules(removeRuleTerm(state.settings.loopRules, g.id, ruleAdded));
+    ruleBox(g).querySelector<HTMLInputElement>('[data-rule-input]')!.focus();
+  } else addRule(g);
+}
+
+function renderRestricted(force = false): void {
+  const el = document.getElementById('restrictedList'); if (!el) return;
+  // Settings redraws for many reasons; never under someone typing a word or using the keyboard here.
+  if (!force && el.contains(document.activeElement)) return;
+  if (!state.accounts.length) { el.innerHTML = '<p class="kv">Link a number first. Each number has its own list.</p>'; return; }
+  const open = new Set([...el.querySelectorAll<HTMLElement>('details[open]')].map(d => d.dataset.restricted));
+  el.innerHTML = state.accounts.map(a => {
+    const r = a.restricted, n = r.words.length;
+    const status = [r.on ? 'On' : 'Off', n === 1 ? '1 word' : n + ' words', r.on && r.hard ? 'Hard block' : ''].filter(Boolean).join(' · ');
+    return '<details class="rule-grp" data-restricted="' + a.id + '"' + (open.has(a.id) ? ' open' : '') + '>' +
+      '<summary><b translate="no">' + esc(a.name) + '</b> <span class="kv">' + status + '</span></summary>' +
+      '<div class="rule-body">' +
+      '<label class="ck-row"><input type="checkbox" data-restricted-on' + (r.on ? ' checked' : '') + '> <span>Check messages from this number</span></label>' +
+      (r.on && !n ? '<p class="hint">Add a word to start checking.</p>' : '') +
+      (n ? '<div class="rule-chips">' + r.words.map(w => '<button type="button" class="rule-chip added" data-restricted-word="' + esc(w) + '" title="Remove"><span translate="no">' + esc(w) + '</span>' + icon('x', 11) + '</button>').join('') + '</div>' : '') +
+      '<div class="rule-add"><input type="text" data-restricted-input maxlength="' + MAX_WORD * MAX_WORDS + '" placeholder="Add words, separated by commas" aria-label="Add words, separated by commas">' +
+      '<button type="button" class="btn btn-sm" data-restricted-add>Add</button></div>' +
+      '<label class="ck-row"><input type="checkbox" data-restricted-hard' + (r.hard ? ' checked' : '') + '> <span>Hard block: no Send anyway, the word has to come out first</span></label>' +
+      '</div></details>';
+  }).join('');
+}
+
+let restrictedSaving: Promise<unknown> = Promise.resolve();
+/** Draws at once and saves in click order, so quick clicks can't land out of order. */
+function setRestricted(a: Account, next: Account['restricted']): void {
+  a.restricted = next;
+  renderRestricted(true);
+  restrictedSaving = restrictedSaving.then(() => api.setNumberRestricted(a.id, next)).catch(fail);
+}
+
+const restrictedBox = (id: string): HTMLElement => document.querySelector<HTMLElement>('[data-restricted="' + id + '"]')!;
+
+function addRestricted(a: Account): void {
+  const input = restrictedBox(a.id).querySelector<HTMLInputElement>('[data-restricted-input]')!;
+  const words = a.restricted.words;
+  const typed = input.value.split(',').map(tidyWord).filter(Boolean);
+  if (!typed.length) return;
+  if (words.length >= MAX_WORDS) { toast('A number can have up to ' + MAX_WORDS + ' words'); return; }
+  const next = cleanWords([...words, input.value]);
+  const added = next.length - words.length;
+  // el amanah and el-amanah match the same messages, so the second adds nothing: say which one already does the job.
+  const variant = typed.find(w => { const kept = coveredBy(w, next); return kept && kept !== w; });
+  const enough = variant ? '“' + coveredBy(variant, next) + '” is enough. It already covers “' + variant + '”.' : '';
+  if (!added) { toast(enough || 'That word is already in this list'); input.select(); return; }
+  setRestricted(a, { ...a.restricted, words: next });
+  restrictedBox(a.id).querySelector<HTMLInputElement>('[data-restricted-input]')!.focus();
+  if (enough) toast(enough);
+  else if (added < typed.length) toast('Added ' + added + '. Skipped ' + (typed.length - added) + ': already listed, too long or over the limit.');
+}
+
+function restrictedClick(b: HTMLElement): void {
+  const a = acctById(b.closest<HTMLElement>('[data-restricted]')?.dataset.restricted ?? '');
+  if (!a) return;
+  const { restrictedWord } = b.dataset;
+  if (restrictedWord === undefined) { addRestricted(a); return; }
+  setRestricted(a, { ...a.restricted, words: a.restricted.words.filter(w => w !== restrictedWord) });
+  restrictedBox(a.id).querySelector<HTMLInputElement>('[data-restricted-input]')!.focus();
+}
+
 function renderTeam(): void {
   const el = document.getElementById('teamList'); if (!el) return;
   el.innerHTML = state.team.length
@@ -1502,6 +1677,7 @@ function renderAutoState(): void {
     : p === 'local' ? `Runs on this computer, one chat at a time, pinned first, at most ${FREE_CAP} chats every 10 minutes so it doesn't hold up your other work.`
     : PROVIDERS[p].quota ? `Runs on the free plan, one chat at a time, pinned first: at most ${FREE_CAP} chats every 10 minutes and no more than the daily budget above. Pauses until the quota resets if Google says it's used up.`
     : p === 'codex' ? 'Runs on your ChatGPT plan, one chat at a time, pinned first. Pauses for 30 minutes if the plan reaches its Codex limit.'
+    : p === 'deepseek' ? 'Spends your DeepSeek balance, one chat at a time, pinned first. Pauses for an hour if the balance runs out.'
     : 'Runs on the service you entered, one chat at a time, pinned first. Pauses if it reports a usage limit.') + skip;
 }
 
@@ -1964,6 +2140,12 @@ document.addEventListener('click', e => {
   const uu = t.closest<HTMLElement>('[data-usage]');
   if (uu) { state.usageUnit = uu.dataset.usage as 'day' | 'week'; renderUsage(); return; }
 
+  const rule = t.closest<HTMLElement>('[data-rule-term],[data-rule-added],[data-rule-add]');
+  if (rule) { ruleClick(rule); return; }
+
+  const restricted = t.closest<HTMLElement>('[data-restricted-word],[data-restricted-add]');
+  if (restricted) { restrictedClick(restricted); return; }
+
   const unteam = t.closest<HTMLElement>('[data-unteam]');
   if (unteam) {
     void api.removeTeam(unteam.dataset.unteam!).then(async list => {
@@ -1981,6 +2163,7 @@ document.addEventListener('click', e => {
   const btn = t.closest('button');
   switch (btn?.id) {
     case 'sendBtn': void sendFromComposer(); return;
+    case 'flaggedGo': { const f = takeFlagged(); if (f === 'edit') void saveEdit(true); else if (f === 'send') void sendFromComposer(true); return; }
     case 'attachBtn': void attachPhoto(); return;
     case 'attachClear': state.photo = null; renderConvo(); return;
     case 'editSave': void saveEdit(); return;
@@ -2012,6 +2195,7 @@ document.addEventListener('click', e => {
     case 'resummarize': void runSummary({ force: true }); return;
     case 'summarize50': void runSummary({ window: 50 }); return;
     case 'pinBtn': { const c = chatById(state.chat); if (c) void togglePin(c); return; }
+    case 'rulesReset': confirmDlg('Reset SUM UP! rules?', 'Words you added are removed and every built-in word switches back on.', 'Reset', () => setRules({})); return;
     case 'rerunSonnet': void api.saveSettings({ model: 'claude-sonnet-5-5' }).then(s => { state.settings = s; void runSummary(); }); return;
     case 'cancelSummary': if (state.summary.chatId) void api.cancelRun('summary:' + state.summary.chatId); return;
     case 'copySummary': { const c = chatById(state.chat); if (c && state.summary.result) void copyText(summaryText(c, state.summary.result.insight), 'Summary'); return; }
@@ -2057,9 +2241,10 @@ document.addEventListener('click', e => {
       return;
     case 'testGemini': void testProvider('gemini'); return;
     case 'testOpenai': void testProvider('openai'); return;
-    case 'disconnectGemini': case 'disconnectOpenai': {
-      const k = btn!.id === 'disconnectGemini' ? 'gemini' : 'openai';
-      void api.disconnectProvider(k).then(() => checkAi(false)).then(() => toast(k === 'gemini' ? 'Gemini key removed' : 'Key forgotten'));
+    case 'testDeepseek': void testProvider('deepseek'); return;
+    case 'disconnectGemini': case 'disconnectOpenai': case 'disconnectDeepseek': {
+      const k = btn!.id === 'disconnectGemini' ? 'gemini' : btn!.id === 'disconnectDeepseek' ? 'deepseek' : 'openai';
+      void api.disconnectProvider(k).then(() => checkAi(false)).then(() => toast(k === 'gemini' ? 'Gemini key removed' : k === 'deepseek' ? 'DeepSeek key removed' : 'Key forgotten'));
       return;
     }
     case 'testNotify': void api.testNotification().then(() => toast('Test sent. Two banners: pinned, then other.', 'ok')).catch(fail); return;
@@ -2228,13 +2413,14 @@ function notConnected(ai: AiStatus): string {
     case 'codex': return ai.cliFound ? 'Codex is not signed in' : 'Codex CLI not found';
     case 'antigravity': return ai.cliFound ? (ai.detail ?? 'Antigravity is not signed in') : 'Antigravity CLI not found';
     case 'local': return ai.cliFound ? 'Ollama has no model installed yet' : 'Ollama is not running on ' + HERE;
+    case 'deepseek': return ai.cliFound ? 'Accept the DeepSeek notice in Settings' : 'No DeepSeek key found';
     default: return 'Not connected';
   }
 }
 
 /* --- AI connection boxes (Settings) --- */
 const BOXES: Record<AiProvider, string> = {
-  'claude-code': '#ccBox', api: '#keyBox', local: '#localBox', gemini: '#geminiBox', openai: '#openaiBox', antigravity: '#agyBox', codex: '#codexBox',
+  'claude-code': '#ccBox', api: '#keyBox', local: '#localBox', gemini: '#geminiBox', deepseek: '#deepseekBox', openai: '#openaiBox', antigravity: '#agyBox', codex: '#codexBox',
 };
 
 /** Fills a text field from settings unless the person is typing in it. */
@@ -2272,6 +2458,19 @@ function renderProviderBox(): void {
     $('#disconnectGemini').hidden = !on;
     const b = $<HTMLButtonElement>('#testGemini');
     b.disabled = ai.testing || !s.geminiAgreed;
+    b.textContent = ai.testing ? 'Testing…' : on ? 'Re-test connection' : 'Test connection';
+  }
+  if (p === 'deepseek') {
+    const env = mine && ai.account;
+    $<HTMLInputElement>('#deepseekAgreed').checked = s.deepseekAgreed;
+    fill('deepseekModel', s.deepseekModel);
+    $('#deepseekFound').hidden = !env;
+    $('#deepseekGuide').hidden = !!env;
+    $('#deepseekState').textContent = checking ?? (on ? (env ? 'Connected · ' + env : 'Connected') : mine && ai.cliFound ? 'Key found' : 'Not connected');
+    // A key from the environment isn't WA Turbo's to remove.
+    $('#disconnectDeepseek').hidden = !on || !!env;
+    const b = $<HTMLButtonElement>('#testDeepseek');
+    b.disabled = ai.testing || !s.deepseekAgreed;
     b.textContent = ai.testing ? 'Testing…' : on ? 'Re-test connection' : 'Test connection';
   }
   if (p === 'openai') {
@@ -2314,13 +2513,15 @@ function renderLocalFound(): void {
     : f.running ? 'Ollama found, no model yet' : 'Not found on ' + HERE;
 }
 
-async function testProvider(kind: 'gemini' | 'openai'): Promise<void> {
-  const input = $<HTMLInputElement>(kind === 'gemini' ? '#geminiKey' : '#openaiKey');
-  const errId = kind === 'gemini' ? 'geminiErr' : 'openaiErr';
+async function testProvider(kind: 'gemini' | 'deepseek' | 'openai'): Promise<void> {
+  const input = $<HTMLInputElement>(`#${kind}Key`);
+  const errId = `${kind}Err`;
   showErr(errId, null);
   if (kind === 'gemini' && !state.settings.geminiAgreed) { showErr(errId, 'Tick the box above first: it says Google may use what you send.'); return; }
+  if (kind === 'deepseek' && !state.settings.deepseekAgreed) { showErr(errId, 'Tick the box above first: it says where these messages go.'); return; }
   const patch: Partial<Settings> = kind === 'gemini'
     ? { geminiModel: $<HTMLInputElement>('#geminiModel').value.trim() }
+    : kind === 'deepseek' ? { deepseekModel: $<HTMLInputElement>('#deepseekModel').value.trim() }
     : { openaiBaseUrl: $<HTMLInputElement>('#openaiBaseUrl').value.trim(), openaiModel: $<HTMLInputElement>('#openaiModel').value.trim() };
   state.settings = await api.saveSettings(patch);
   state.ai.testing = true; renderSettings();
@@ -2402,6 +2603,11 @@ document.addEventListener('change', e => {
     setLang(t.value);
     return;
   }
+  if (t.matches('[data-restricted-on],[data-restricted-hard]')) {
+    const a = acctById(t.closest<HTMLElement>('[data-restricted]')?.dataset.restricted ?? '');
+    if (a) setRestricted(a, { ...a.restricted, [t.matches('[data-restricted-on]') ? 'on' : 'hard']: t.checked });
+    return;
+  }
   if (t.dataset.numlang && (t.value === 'en' || t.value === 'id')) {
     const a = acctById(t.dataset.numlang);
     void api.setNumberLang(t.dataset.numlang, t.value).then(accts => {
@@ -2416,8 +2622,8 @@ document.addEventListener('change', e => {
     state.ai = { ...state.ai, provider: t.value as AiProvider, connected: false, testing: true };
     void api.saveSettings({ provider: t.value as AiProvider }).then(s => { state.settings = s; return checkAi(false); });
   }
-  if (t.id === 'geminiAgreed') void api.saveSettings({ geminiAgreed: t.checked }).then(s => { state.settings = s; return checkAi(false); });
-  if (['geminiModel', 'openaiModel', 'openaiBaseUrl', 'agyModel', 'codexModel'].includes(t.id)) {
+  if (t.id === 'geminiAgreed' || t.id === 'deepseekAgreed') void api.saveSettings({ [t.id]: t.checked } as Partial<Settings>).then(s => { state.settings = s; return checkAi(false); });
+  if (['geminiModel', 'deepseekModel', 'openaiModel', 'openaiBaseUrl', 'agyModel', 'codexModel'].includes(t.id)) {
     void api.saveSettings({ [t.id]: t.value.trim() } as Partial<Settings>).then(s => { state.settings = s; return t.id.startsWith('openai') ? checkAi(false) : renderSettings(); });
   }
   if (t.id === 'autoDailyBudget') void api.saveSettings({ autoDailyBudget: Number(t.value) }).then(s => { state.settings = s; renderAutoState(); });
@@ -2457,6 +2663,16 @@ document.addEventListener('keydown', e => {
   if ((e.target as HTMLElement).id === 'editBox' && e.key === 'Escape') { state.editing = null; renderConvoKeepScroll(); return; }
   if (e.key === 'Escape') closeAcctMenu();
   if ((e.target as HTMLElement).id === 'pairName' && e.key === 'Enter') { e.preventDefault(); void pairNext(); }
+  if ((e.target as HTMLElement).matches('[data-restricted-input]') && e.key === 'Enter' && !e.isComposing) {
+    e.preventDefault();
+    const a = acctById((e.target as HTMLElement).closest<HTMLElement>('[data-restricted]')?.dataset.restricted ?? '');
+    if (a) addRestricted(a);
+  }
+  if ((e.target as HTMLElement).matches('[data-rule-input]') && e.key === 'Enter' && !e.isComposing) {
+    e.preventDefault();
+    const g = RULE_GROUPS.find(x => x.id === (e.target as HTMLElement).closest<HTMLElement>('[data-rule-group]')?.dataset.ruleGroup);
+    if (g) addRule(g);
+  }
   if (e.key === 'Escape' && state.panelOpen && !wide.matches && !document.querySelector('dialog[open]')) { state.panelOpen = false; syncPanel(); }
 });
 
@@ -2499,7 +2715,7 @@ api.on('accounts', accounts => {
   state.accounts = accounts;
   if (!state.acct && accounts.length) state.acct = accounts[0].id;
   render();
-  if (state.view === 'settings') renderLangList();
+  if (state.view === 'settings') { renderLangList(); renderRestricted(); }
   if ($<HTMLDialogElement>('#dlgPair').open) renderPair();
 });
 api.on('chats-changed', () => {
@@ -2553,6 +2769,13 @@ api.on('summary', s => {
     if (state.view === 'inbox') renderPanel();
   }
 });
+api.on('checking', () => {
+  state.checking = true;
+  document.getElementById('sendBtn')?.classList.add('checking');
+  const save = document.getElementById('editSave');
+  if (save) save.textContent = 'Checking…';
+});
+$<HTMLDialogElement>('#dlgFlagged').addEventListener('close', () => { flagged = null; (document.getElementById('editBox') ?? document.getElementById('composer'))?.focus(); });
 api.on('auto', a => { state.auto = a; if (state.view === 'settings') renderAutoState(); });
 api.on('pair', p => {
   const wasLinked = state.pair.phase === 'linked';

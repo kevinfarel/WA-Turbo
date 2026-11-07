@@ -247,6 +247,10 @@
               <span><b>Anthropic API key</b><span class="kv">Billed separately, per token.</span></span>
             </label>
             <label class="prov-opt">
+              <input type="radio" name="provider" value="deepseek">
+              <span><b>DeepSeek <span class="beta">Experimental</span></b><span class="kv">Prepaid API key. Finds DEEPSEEK_API_KEY on this computer.</span></span>
+            </label>
+            <label class="prov-opt">
               <input type="radio" name="provider" value="openai">
               <span><b>Other (OpenAI-compatible)</b><span class="kv">Groq, OpenRouter, OpenAI or any compatible address.</span></span>
             </label>
@@ -353,6 +357,47 @@
               <button type="button" class="btn" id="disconnectGemini" hidden>Disconnect</button>
               <span class="od-fill"></span>
               <span class="kv" id="geminiState">Not connected</span>
+            </div>
+          </div>
+
+          <div class="prov-box" id="deepseekBox" hidden>
+            <p class="hint">DeepSeek has no subscription or account login to connect: it sells API access from a prepaid balance, so WA Turbo uses your API key. If DEEPSEEK_API_KEY is already set on this computer, WA Turbo finds it by itself. Otherwise paste a key below. Flash can see photos; Pro reads text only.</p>
+            <p class="hint" id="deepseekFound" hidden>Found DEEPSEEK_API_KEY on this computer, so there is nothing to paste.</p>
+            <div class="guide" id="deepseekGuide">
+              <b>Get a key</b>
+              <ol class="howto">
+                <li>Press <b>Open DeepSeek Platform</b> below. It opens platform.deepseek.com/api_keys in your browser.</li>
+                <li>Sign in, then add some balance on the <b>Top up</b> page. Requests fail while the balance is empty.</li>
+                <li>Press <b>Create new API key</b> and copy it. It starts with <code>sk-</code>.</li>
+                <li>Come back here, tick the box under the warning, paste the key and press <b>Test connection</b>.</li>
+              </ol>
+              <div class="od-row" style="--od-gap:8px">
+                <a class="btn" href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener">Open DeepSeek Platform</a>
+                <span class="kv">Keep the key private. You can delete it on the platform any time.</span>
+              </div>
+            </div>
+            <div class="banner warn">
+              <svg class="od-icon" style="--od-icon-size:16px;margin-top:1px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0"/></svg>
+              <span><b>These messages go to China.</b> DeepSeek is a Chinese company. Its privacy policy says it stores data in the People's Republic of China and may use it to train its models, and its API terms don't promise otherwise. Use "Local model" to keep chats private.</span>
+            </div>
+            <label class="ck-row"><input type="checkbox" id="deepseekAgreed"> <span>I understand, and I'm allowed to send these chats to DeepSeek</span></label>
+            <div class="inline-row">
+              <label class="f">
+                <span class="lb">DeepSeek API key</span>
+                <input type="password" id="deepseekKey" class="mono" placeholder="sk-..." autocomplete="off" spellcheck="false" aria-describedby="deepseekErr">
+              </label>
+            </div>
+            <label class="f">
+              <span class="lb">Model</span>
+              <input type="text" id="deepseekModel" class="mono" placeholder="deepseek-flash" autocomplete="off" spellcheck="false">
+              <span class="hp">Leave empty for Flash, DeepSeek's cheaper model. Pro is deepseek-v4-pro.</span>
+            </label>
+            <p class="err" id="deepseekErr" hidden></p>
+            <div class="od-row" style="--od-gap:8px">
+              <button type="button" class="btn btn-primary" id="testDeepseek">Test connection</button>
+              <button type="button" class="btn" id="disconnectDeepseek" hidden>Disconnect</button>
+              <span class="od-fill"></span>
+              <span class="kv" id="deepseekState">Not connected</span>
             </div>
           </div>
 
@@ -551,6 +596,32 @@
           <ul class="team-list" id="teamList"></ul>
         </div>
 
+        <div class="fs" id="rulesBlock">
+          <h2>SUM UP! rules</h2>
+          <p class="hint">The words that turn a message into a SUM UP! card without any AI, in English and Bahasa Indonesia. Click a word to switch it off, or add your own. Changes apply to new messages.</p>
+          <div class="rule-groups" id="ruleGroups"></div>
+          <div class="od-row" style="--od-gap:8px"><button type="button" class="btn btn-sm" id="rulesReset" hidden>Reset to defaults</button></div>
+        </div>
+
+        <div class="fs" id="restrictedBlock">
+          <h2>Restricted words</h2>
+          <p class="hint">Words a number must never mention, each number with its own list. WA Turbo checks a message after you press Send, before it goes out. Spacing and punctuation don't matter, and captions and attachment names are checked; what is inside a photo is not. If a word looks close but not exact, the message and that word go to your connected AI to decide. With no AI connected, only exact words are caught.</p>
+          <div class="rule-groups">
+            <details class="rule-grp">
+              <summary><b>How to write your words</b></summary>
+              <ul class="rule-tips">
+                <li><b>Add several at once.</b> Separate them with commas. Capitals don't matter; words are kept in lowercase.</li>
+                <li><b>Add the short name and the full name.</b> Enter them as separate words, because a name of several words only matches when all of it appears, in order.</li>
+                <li><b>Add a part people use by itself.</b> If a long name is often shortened to one word, add that word too.</li>
+                <li><b>Skip ordinary words.</b> Every match stops the message, so pick names that can only mean that company. Abbreviations that are also common terms will stop messages you meant to send.</li>
+                <li><b>Skip variants.</b> Endings like -nya, -ku and -mu, spaces, dashes and dots inside a word, and capitals are already covered. Typos are too once a word has 3 letters and an AI is connected.</li>
+                <li><b>Set up every number.</b> Each one has its own list. List the names of your other numbers, not its own.</li>
+              </ul>
+            </details>
+          </div>
+          <div class="rule-groups" id="restrictedList"></div>
+        </div>
+
         <div class="fs" id="dbBlock">
           <h2>Database</h2>
           <p class="hint">Chats, SUM UP! cards, reports and settings are kept in a PostgreSQL database built into WA Turbo, in a folder on this Mac. Nothing needs installing and nothing is stored anywhere else.</p>
@@ -595,6 +666,13 @@
               </div>
             </details>
             <details>
+              <summary>How do restricted words work?</summary>
+              <div class="fa">
+                <p>Each number can have its own list in Settings → Restricted words. After you press Send or save an edit, WA Turbo looks for those words on this Mac, in the message and in the name of any attachment. An exact match holds the message back and tells you which word and which number; you can go back and fix it, or Send anyway. With Hard block on, the word has to come out first.</p>
+                <p>If a word only looks close, such as a typo, the message and that word go to your connected AI, which answers with a list and nothing else. If the AI is slow or unavailable, the message still goes and a note tells you the AI check was skipped. The AI never writes or sends anything.</p>
+              </div>
+            </details>
+            <details>
               <summary>Can I keep a photo from a chat?</summary>
               <div class="fa">
                 <p>Yes. Every photo and file in a chat has a save button, and the full-size viewer has Save to this Mac. Opened photos are also kept in WA Turbo's own folder so they load instantly next time.</p>
@@ -603,7 +681,7 @@
             <details>
               <summary>Where do my messages go?</summary>
               <div class="fa">
-                <p>Chats stay on this Mac, in the database built into WA Turbo. Only what you select for a summary or report is sent, and only to the AI you picked in Settings: Anthropic (Claude Code or an API key), Google (a Gemini key or Antigravity), OpenAI (Codex) or the service you entered. With "Local model" nothing leaves the Mac at all. There is no WA Turbo server in between. Phone numbers in the text are swapped for stable aliases before the request leaves the Mac. Photos are sent as they are, so a number or name inside a photo is not hidden. Generated reports are written locally and are not synced anywhere.</p>
+                <p>Chats stay on this Mac, in the database built into WA Turbo. Only what you select for a summary or report is sent, and only to the AI you picked in Settings: Anthropic (Claude Code or an API key), Google (a Gemini key or Antigravity), OpenAI (Codex), DeepSeek or the service you entered. With "Local model" nothing leaves the Mac at all. There is no WA Turbo server in between. Phone numbers in the text are swapped for stable aliases before the request leaves the Mac. Photos are sent as they are, so a number or name inside a photo is not hidden. Generated reports are written locally and are not synced anywhere.</p>
               </div>
             </details>
             <details>
@@ -617,6 +695,7 @@
               <div class="fa">
                 <p>Simple rules run on this Mac as messages arrive: a question or request to you, your own ask, or your own promise. Nothing is sent anywhere to do that. Those loops carry an "auto" tag and a Not a loop button. When you summarize the chat, the AI reviews them and can dismiss false ones.</p>
                 <p>The rules also close loops on their own: when you replied and the other side then said thanks, ok or noted, the loop closes and says why. The same question sent twice counts as one loop they chased.</p>
+                <p>You can change the words these rules look for in Settings → SUM UP! rules.</p>
               </div>
             </details>
             <details>
@@ -750,6 +829,19 @@
       <span class="od-fill"></span>
       <button type="button" class="btn" data-close>Keep it</button>
       <button type="button" class="btn btn-danger" id="cfGo">Delete</button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- ===== restricted words: a message held back ===== -->
+<dialog id="dlgFlagged" aria-labelledby="flTitle">
+  <form class="sheet" method="dialog" style="max-width:420px">
+    <header><div class="od-fill"><h2 id="flTitle">Check this message</h2><p id="flBody"></p></div></header>
+    <footer>
+      <span class="od-fill"></span>
+      <!-- First, so it takes the focus: a stray Enter must never send. -->
+      <button type="button" class="btn btn-primary" data-close>Go back</button>
+      <button type="button" class="btn" id="flaggedGo">Send anyway</button>
     </footer>
   </form>
 </dialog>

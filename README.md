@@ -1,6 +1,6 @@
 # WA Turbo
 
-A desktop app that links several WhatsApp numbers on one computer and uses AI to summarize chats, write reports and track who is still waiting for a reply (SUM UP!, beta). The AI can be Claude (your Claude plan or an API key), a model you already run with Ollama (Qwen, Gemma and so on, detected automatically), a free Gemini key, any OpenAI-compatible service, or, experimentally, your ChatGPT (Codex) or Google (Antigravity) plan. Everything runs locally: chats are stored in a PostgreSQL database built into the app, and nothing goes to a WA Turbo server, because there isn't one.
+A desktop app that links several WhatsApp numbers on one computer and uses AI to summarize chats, write reports and track who is still waiting for a reply (SUM UP!, beta). The AI can be Claude (your Claude plan or an API key), a model you already run with Ollama (Qwen, Gemma and so on, detected automatically), a free Gemini key, any OpenAI-compatible service, or, experimentally, your ChatGPT (Codex) or Google (Antigravity) plan or a DeepSeek API key. Everything runs locally: chats are stored in a PostgreSQL database built into the app, and nothing goes to a WA Turbo server, because there isn't one.
 
 Current release: see [CHANGELOG.md](CHANGELOG.md). Runs on macOS (Apple Silicon) and Windows 10/11 (x64).
 
@@ -26,7 +26,7 @@ Current release: see [CHANGELOG.md](CHANGELOG.md). Runs on macOS (Apple Silicon)
 |---|---|
 | Machine | macOS 13+ on Apple Silicon, or Windows 10/11 x64 |
 | Node | 22.12 or newer (`.nvmrc`). With Homebrew: `PATH=/opt/homebrew/opt/node@22/bin:$PATH` |
-| AI | One of: Claude Code signed in with a Claude plan (default); an Anthropic API key; a model you run with Ollama (found on 127.0.0.1:11434); a free Gemini key; an OpenAI-compatible address; or, experimental, the Codex CLI (ChatGPT Plus+) or Antigravity CLI (Google account) signed in |
+| AI | One of: Claude Code signed in with a Claude plan (default); an Anthropic API key; a model you run with Ollama (found on 127.0.0.1:11434); a free Gemini key; an OpenAI-compatible address; or, experimental, the Codex CLI (ChatGPT Plus+) or Antigravity CLI (Google account) signed in, or a DeepSeek API key (found in `DEEPSEEK_API_KEY` or pasted) |
 | Database | None to install: PostgreSQL 18 ships inside the app |
 
 ## Getting started
@@ -89,7 +89,7 @@ src/main/          Electron main process
   ingest/          Writing WhatsApp events to the database
   loops/           SUM UP! local rules and loop service
   ai/              AI: providers (client.ts routes to Claude Code, API key, Ollama models local.ts,
-                   OpenAI-compatible, Codex, Antigravity), context, redaction, prompts, schemas,
+                   OpenAI-compatible, DeepSeek, Codex, Antigravity), context, redaction, prompts, schemas,
                    summarize, report, auto summary
   notify/          Notifications, badge, menu bar icon (never on the send path)
   ipc/router.ts    Every call the window can make

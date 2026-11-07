@@ -20,7 +20,17 @@ export interface Account {
   lang: Lang | null;
   /** True when lang was detected from the chats rather than picked. */
   langDetected: boolean;
+  /** Words this number must never mention. */
+  restricted: RestrictedRule;
 }
+
+/** A number's restricted words. hard = no Send anyway. */
+export interface RestrictedRule { on: boolean; hard: boolean; words: string[] }
+
+/** What became of a send or an edit: it went out, or the restricted words check held it back. */
+export type SendOutcome =
+  | { sent: true; aiSkipped: boolean }
+  | { sent: false; number: string; words: string[]; by: 'exact' | 'ai'; hard: boolean; /** Set when only the attachment's name matched. */ file?: string };
 
 export type ChatKind = 'dm' | 'group';
 
@@ -115,12 +125,18 @@ export type ModelId = string;
 
 /**
  * How WA Turbo reaches an AI: the Claude Code login (the person's Claude plan), an Anthropic API key, the engine
- * person's own Ollama models (local), a Gemini key, any OpenAI-compatible service, or the Antigravity and Codex CLIs.
+ * person's own Ollama models (local), a Gemini or DeepSeek key, any OpenAI-compatible service, or the Antigravity and Codex CLIs.
  */
-export type AiProvider = 'claude-code' | 'api' | 'local' | 'gemini' | 'openai' | 'antigravity' | 'codex';
+export type AiProvider = 'claude-code' | 'api' | 'local' | 'gemini' | 'deepseek' | 'openai' | 'antigravity' | 'codex';
 
 /** What the Summarize button reads: this week (Monday 00:00 to now, newest 300 at most) or a fixed count. */
 export type SummaryWindow = 'week' | 50 | 100 | 300;
+
+/** The word lists behind the local loop rules, as named in Settings → SUM UP! rules. */
+export type RuleGroupId = 'ask' | 'myAsk' | 'promise' | 'followUp' | 'ignore' | 'thanks' | 'okay' | 'defer';
+/** Changes to one list: built-in terms switched off (by label), and terms the person added. */
+export interface RuleEdits { off?: string[]; add?: string[] }
+export type LoopRules = Partial<Record<RuleGroupId, RuleEdits>>;
 
 export interface Settings {
   provider: AiProvider;
@@ -129,6 +145,7 @@ export interface Settings {
   /** Each other provider's model; empty means that provider's own default. */
   localModel: string;
   geminiModel: string;
+  deepseekModel: string;
   openaiModel: string;
   /** OpenAI-compatible: the service's base URL, e.g. https://api.groq.com/openai/v1. */
   openaiBaseUrl: string;
@@ -136,6 +153,8 @@ export interface Settings {
   codexModel: string;
   /** The person accepted that Google may use messages sent with a free Gemini key to improve its products. */
   geminiAgreed: boolean;
+  /** The person accepted that messages go to DeepSeek, in China, under its data terms. */
+  deepseekAgreed: boolean;
   /** Gemini and Antigravity: auto summary stops after this many runs a day (0 = no limit). */
   autoDailyBudget: number;
   window: SummaryWindow;
@@ -167,6 +186,8 @@ export interface Settings {
   notifyPausedUntil: number;
   /** Calling code for local numbers in imported contacts ("0812…" → +62 812…). Empty = guess from the linked number. */
   contactsCountry: string;
+  /** Changes to the local loop rules. Empty means the built-in rules exactly as shipped. */
+  loopRules: LoopRules;
 }
 
 /** Where a name in the contacts import came from: the file, an earlier import, or the phone that owns the number (via WhatsApp). */
@@ -208,9 +229,9 @@ export interface AiStatus {
   provider: AiProvider;
   connected: boolean;
   testing: boolean;
-  /** CLI providers: whether the CLI was found. Local model: whether Ollama is running. */
+  /** CLI providers: whether the CLI was found. Local model: whether Ollama is running. DeepSeek: whether a key was found. */
   cliFound: boolean;
-  /** Who or what it runs as: "me@x.com · Pro", "Ollama 0.40.5". */
+  /** Who or what it runs as: "me@x.com · Pro", "Ollama 0.40.5", or the variable a DeepSeek key came from. */
   account: string | null;
   /** Local model: the models installed in Ollama. */
   models?: string[];
