@@ -23,8 +23,8 @@ const HOPS = [
 ];
 // In the window, each outgoing call lives in one function, and only a click or key press calls it.
 const GESTURES = [
-  { fn: 'sendFromComposer', api: 'api.sendMessage', callers: /case 'sendBtn'|e\.key === 'Enter'/, says: 'only the Send button or Enter may send' },
-  { fn: 'saveEdit', api: 'api.editMessage', callers: /case 'editSave'|e\.key === 'Enter'/, says: 'only the Save button or Enter may save an edit' },
+  { fn: 'sendFromComposer', api: 'api.sendMessage', callers: /case 'sendBtn'|e\.key === 'Enter'|case 'flaggedGo'/, says: 'only the Send button, Enter or Send anyway may send' },
+  { fn: 'saveEdit', api: 'api.editMessage', callers: /case 'editSave'|e\.key === 'Enter'|case 'flaggedGo'/, says: 'only the Save button, Enter or Save anyway may save an edit' },
   { fn: 'removeForEveryone', api: 'api.deleteForEveryone', callers: /confirmDlg\(/, says: 'delete for everyone runs only after the confirm dialog' },
 ];
 // Code that runs on its own (AI, rules, ingest, notifications) must not reach the send path at all.

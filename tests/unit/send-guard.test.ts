@@ -24,6 +24,12 @@ describe('send guard', () => {
     expect(findViolations(root).join('\n')).toMatch(/AI, rules, ingest and notifications may not send/);
   });
 
+  it('Send anyway may send, and only from its own dialog button', () => {
+    const app = (line: string) => tree({ 'renderer/app.ts': `async function sendFromComposer(allowFlagged = false) {\n  await api.sendMessage(c, t, null, [], allowFlagged);\n}\n${line}\n` });
+    expect(findViolations(app("    case 'flaggedGo': { void sendFromComposer(true); return; }")).join('\n')).not.toMatch(/may send/);
+    expect(findViolations(app('api.on(\'messages\', () => { void sendFromComposer(true); });')).join('\n')).toMatch(/Send anyway may send/);
+  });
+
   it('notification code may not send either', () => {
     const root = tree({ 'main/notify/center.ts': "import { WaManager } from '../wa/manager';" });
     expect(findViolations(root).join('\n')).toMatch(/notifications may not send/);
@@ -35,7 +41,7 @@ describe('send guard', () => {
     });
     const hits = findViolations(root).join('\n');
     expect(hits).toMatch(/never on a timer/);
-    expect(hits).toMatch(/only the Send button or Enter may send/);
+    expect(hits).toMatch(/only the Send button, Enter or Send anyway may send/);
   });
 
   it('edit and delete for everyone only from a click, key or the confirm dialog', () => {
@@ -43,7 +49,7 @@ describe('send guard', () => {
       'renderer/app.ts': "async function saveEdit() {\n  await api.editMessage(id, t);\n}\nasync function removeForEveryone(id) {\n  await api.deleteForEveryone(id);\n}\napi.on('summary', () => saveEdit());\nfor (const m of mine) void removeForEveryone(m.id);\n",
     });
     const hits = findViolations(root).join('\n');
-    expect(hits).toMatch(/only the Save button or Enter may save an edit/);
+    expect(hits).toMatch(/only the Save button, Enter or Save anyway may save an edit/);
     expect(hits).toMatch(/only after the confirm dialog/);
   });
 

@@ -603,6 +603,25 @@
           <div class="od-row" style="--od-gap:8px"><button type="button" class="btn btn-sm" id="rulesReset" hidden>Reset to defaults</button></div>
         </div>
 
+        <div class="fs" id="restrictedBlock">
+          <h2>Restricted words</h2>
+          <p class="hint">Words a number must never mention, each number with its own list. WA Turbo checks a message after you press Send, before it goes out. Spacing and punctuation don't matter, and captions and attachment names are checked; what is inside a photo is not. If a word looks close but not exact, the message and that word go to your connected AI to decide. With no AI connected, only exact words are caught.</p>
+          <div class="rule-groups">
+            <details class="rule-grp">
+              <summary><b>How to write your words</b></summary>
+              <ul class="rule-tips">
+                <li><b>Add several at once.</b> Separate them with commas. Capitals don't matter; words are kept in lowercase.</li>
+                <li><b>Add the short name and the full name.</b> Enter them as separate words, because a name of several words only matches when all of it appears, in order.</li>
+                <li><b>Add a part people use by itself.</b> If a long name is often shortened to one word, add that word too.</li>
+                <li><b>Skip ordinary words.</b> Every match stops the message, so pick names that can only mean that company. Abbreviations that are also common terms will stop messages you meant to send.</li>
+                <li><b>Skip variants.</b> Endings like -nya, -ku and -mu, spaces, dashes and dots inside a word, and capitals are already covered. Typos are too once a word has 3 letters and an AI is connected.</li>
+                <li><b>Set up every number.</b> Each one has its own list. List the names of your other numbers, not its own.</li>
+              </ul>
+            </details>
+          </div>
+          <div class="rule-groups" id="restrictedList"></div>
+        </div>
+
         <div class="fs" id="dbBlock">
           <h2>Database</h2>
           <p class="hint">Chats, SUM UP! cards, reports and settings are kept in a PostgreSQL database built into WA Turbo, in a folder on this Mac. Nothing needs installing and nothing is stored anywhere else.</p>
@@ -644,6 +663,13 @@
               <div class="fa">
                 <p><b>Text and photos.</b> When you summarize a chat or build a report, WA Turbo sends the message text inside the window you chose, plus up to the 10 most recent photos in that chat, so a transfer receipt or a screenshot of an error counts as part of the conversation. Photos the AI can see are tagged “Read by AI” in the chat.</p>
                 <p><b>Everything else stays a placeholder.</b> Voice notes, videos, documents, stickers and location pins are never sent; the model only sees that one was there. Turn photos off in the Model section above if you would rather send text only.</p>
+              </div>
+            </details>
+            <details>
+              <summary>How do restricted words work?</summary>
+              <div class="fa">
+                <p>Each number can have its own list in Settings → Restricted words. After you press Send or save an edit, WA Turbo looks for those words on this Mac, in the message and in the name of any attachment. An exact match holds the message back and tells you which word and which number; you can go back and fix it, or Send anyway. With Hard block on, the word has to come out first.</p>
+                <p>If a word only looks close, such as a typo, the message and that word go to your connected AI, which answers with a list and nothing else. If the AI is slow or unavailable, the message still goes and a note tells you the AI check was skipped. The AI never writes or sends anything.</p>
               </div>
             </details>
             <details>
@@ -803,6 +829,19 @@
       <span class="od-fill"></span>
       <button type="button" class="btn" data-close>Keep it</button>
       <button type="button" class="btn btn-danger" id="cfGo">Delete</button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- ===== restricted words: a message held back ===== -->
+<dialog id="dlgFlagged" aria-labelledby="flTitle">
+  <form class="sheet" method="dialog" style="max-width:420px">
+    <header><div class="od-fill"><h2 id="flTitle">Check this message</h2><p id="flBody"></p></div></header>
+    <footer>
+      <span class="od-fill"></span>
+      <!-- First, so it takes the focus: a stray Enter must never send. -->
+      <button type="button" class="btn btn-primary" data-close>Go back</button>
+      <button type="button" class="btn" id="flaggedGo">Send anyway</button>
     </footer>
   </form>
 </dialog>
